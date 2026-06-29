@@ -1,5 +1,7 @@
 # World Cup Betting Spend  Live Dashboard
-get the API KEY HERE https://the-odds-api.com/#get-access
+
+GET THE API KEY HERE https://the-odds-api.com/#get-access
+
 Flask + Socket.IO + SQLite + React. Logged-in users place mock bets; everyone
 connected sees the total spend and per-team breakdown update **live** over a
 websocket. Team odds are a static list (no external API).
