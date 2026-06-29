@@ -1,9 +1,11 @@
 """World Cup betting-spend dashboard: Flask + SocketIO + SQLite.
 
 Run Here:  pip install -r requirements.txt  &&  python app.py"""
-import os, sqlite3, time
+import os, time
 from flask import Flask, request, session, jsonify, send_from_directory
+from flask_sqlalchemy import SQLAlchemy
 from flask_socketio import SocketIO, emit
+from sqlalchemy import func
 from werkzeug.security import generate_password_hash, check_password_hash
 
 DB = os.path.join(os.path.dirname(__file__), "app.db")
@@ -11,34 +13,36 @@ DIST = os.path.join(os.path.dirname(__file__), "frontend", "dist")
 
 app = Flask(__name__, static_folder=None)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-change-me")  # ponytail: fine for a demo; set SECRET_KEY in prod
+app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///" + DB
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+db = SQLAlchemy(app)
 
 
-def db():
-    c = sqlite3.connect(DB)
-    c.row_factory = sqlite3.Row
-    return c
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String, unique=True, nullable=False)
+    pw_hash = db.Column(db.String, nullable=False)
 
 
-def init_db():
-    with db() as c:
-        c.executescript("""
-        CREATE TABLE IF NOT EXISTS users(
-            id INTEGER PRIMARY KEY, username TEXT UNIQUE, pw_hash TEXT);
-        CREATE TABLE IF NOT EXISTS bets(
-            id INTEGER PRIMARY KEY, user_id INTEGER, match TEXT, team TEXT,
-            amount REAL, odds REAL, ts REAL);
-        """)
+class Bet(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    match = db.Column(db.String)
+    team = db.Column(db.String)
+    amount = db.Column(db.Float)
+    odds = db.Column(db.Float)
+    ts = db.Column(db.Float)
 
 
 def aggregates():
-    """Total mock money spent, broken down by team — what the dashboard shows."""
-    with db() as c:
-        total = c.execute("SELECT COALESCE(SUM(amount),0) t FROM bets").fetchone()["t"]
-        rows = c.execute(
-            "SELECT team, SUM(amount) spent, COUNT(*) n FROM bets "
-            "GROUP BY team ORDER BY spent DESC").fetchall()
-    return {"total": total, "by_team": [dict(r) for r in rows]}
+    """Total mock money spent, broken down by team  what the dashboard shows."""
+    total = db.session.query(func.coalesce(func.sum(Bet.amount), 0)).scalar()
+    rows = (db.session.query(Bet.team,
+                             func.sum(Bet.amount).label("spent"),
+                             func.count().label("n"))
+            .group_by(Bet.team).order_by(func.sum(Bet.amount).desc()).all())
+    return {"total": total,
+            "by_team": [{"team": t, "spent": s, "n": n} for t, s, n in rows]}
 
 
 # --- auth ---------------------------------------------------------------
@@ -48,12 +52,11 @@ def signup():
     u, p = (d.get("username") or "").strip(), d.get("password") or ""
     if not u or not p:
         return jsonify(error="username and password required"), 400
-    try:
-        with db() as c:
-            c.execute("INSERT INTO users(username,pw_hash) VALUES(?,?)",
-                      (u, generate_password_hash(p, method="pbkdf2:sha256")))  # salted
-    except sqlite3.IntegrityError:
+    if User.query.filter_by(username=u).first():
         return jsonify(error="username taken"), 409
+    db.session.add(User(username=u,
+                        pw_hash=generate_password_hash(p, method="pbkdf2:sha256")))  # salted
+    db.session.commit()
     session["user"] = u
     return jsonify(username=u)
 
@@ -62,9 +65,8 @@ def signup():
 def login():
     d = request.get_json(force=True)
     u, p = (d.get("username") or "").strip(), d.get("password") or ""
-    with db() as c:
-        row = c.execute("SELECT * FROM users WHERE username=?", (u,)).fetchone()
-    if not row or not check_password_hash(row["pw_hash"], p):
+    user = User.query.filter_by(username=u).first()
+    if not user or not check_password_hash(user.pw_hash, p):
         return jsonify(error="bad credentials"), 401
     session["user"] = u
     return jsonify(username=u)
@@ -94,12 +96,10 @@ def place_bet():
     if amount <= 0:
         return jsonify(error="amount must be positive"), 400
     match, team = d.get("match", ""), d.get("team", "")
-    with db() as c:
-        uid = c.execute("SELECT id FROM users WHERE username=?",
-                        (session["user"],)).fetchone()["id"]
-        odds = ODDS.get(team, 2.0)
-        c.execute("INSERT INTO bets(user_id,match,team,amount,odds,ts) "
-                  "VALUES(?,?,?,?,?,?)", (uid, match, team, amount, odds, time.time()))
+    user = User.query.filter_by(username=session["user"]).first()
+    db.session.add(Bet(user_id=user.id, match=match, team=team,
+                       amount=amount, odds=ODDS.get(team, 2.0), ts=time.time()))
+    db.session.commit()
     socketio.emit("aggregates", aggregates())  # live push to everyone
     return jsonify(ok=True)
 
@@ -130,6 +130,7 @@ def spa(path=""):
 
 
 if __name__ == "__main__":
-    init_db()
+    with app.app_context():
+        db.create_all()
     port = int(os.environ.get("PORT", 5000))
     socketio.run(app, host="0.0.0.0", port=port, debug=True, allow_unsafe_werkzeug=True)

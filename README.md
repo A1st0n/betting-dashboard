@@ -1,5 +1,5 @@
 # World Cup Betting Spend  Live Dashboard
-
+get the API KEY HERE https://the-odds-api.com/#get-access
 Flask + Socket.IO + SQLite + React. Logged-in users place mock bets; everyone
 connected sees the total spend and per-team breakdown update **live** over a
 websocket. Team odds are a static list (no external API).
@@ -10,7 +10,7 @@ websocket. Team odds are a static list (no external API).
 |------|------|------|
 | Backend / API / websocket | Flask + Flask-SocketIO | `app.py` |
 | Auth | `werkzeug.security` (salted pbkdf2 hashing) | `app.py` |
-| Database | SQLite (auto-created on first run) | `app.db` |
+| Database | SQLite via SQLAlchemy ORM (`User`, `Bet` models) | `app.py` / `app.db` |
 | Front end | React + Vite + `socket.io-client` | `frontend/` |
 
 ## Prerequisites
@@ -81,9 +81,9 @@ Open **http://localhost:5173**.
 ## Project layout
 
 ```
-app.py              Flask: auth, /api/bet, websocket, serves built React
+app.py              Flask: SQLAlchemy models, auth, /api/bet, websocket, serves built React
 requirements.txt
-app.db              SQLite, auto-created (gitignored)
+app.db              SQLite, auto-created by db.create_all() (gitignored)
 frontend/
   package.json
   vite.config.js    dev proxy -> Flask
