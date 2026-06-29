@@ -1,14 +1,12 @@
 """World Cup betting-spend dashboard: Flask + SocketIO + SQLite.
 
-Run Here:  pip install -r requirements.txt  &&  python app.py
-import os, sqlite3, time, random, threading
-import requests
+Run Here:  pip install -r requirements.txt  &&  python app.py"""
+import os, sqlite3, time
 from flask import Flask, request, session, jsonify, send_from_directory
 from flask_socketio import SocketIO, emit
 from werkzeug.security import generate_password_hash, check_password_hash
 
 DB = os.path.join(os.path.dirname(__file__), "app.db")
-ODDS_API_KEY = os.environ.get("ODDS_API_KEY")
 DIST = os.path.join(os.path.dirname(__file__), "frontend", "dist")
 
 app = Flask(__name__, static_folder=None)
@@ -83,7 +81,7 @@ def me():
     return jsonify(username=session.get("user"))
 
 
-# --- bets ---------------------------------------------------------------
+# --- bets 
 @app.post("/api/bet")
 def place_bet():
     if "user" not in session:
@@ -106,44 +104,11 @@ def place_bet():
     return jsonify(ok=True)
 
 
-# --- odds poller --------------------------------------------------------
-ODDS = {}  # team -> decimal odds, refreshed in background
-
-
-def fetch_odds():
-    """Real odds if ODDS_API_KEY set, else synthetic. ponytail: 1 poll/min,
-    cached in module global — fine for a demo, not multi-instance."""
-    if ODDS_API_KEY:
-        try:
-            r = requests.get(
-                "https://api.the-odds-api.com/v4/sports/soccer_fifa_world_cup/odds",
-                params={"apiKey": ODDS_API_KEY, "regions": "us", "markets": "h2h"},
-                timeout=10)
-            out = {}
-            for game in r.json():
-                for bm in game.get("bookmakers", [])[:1]:
-                    for mk in bm["markets"]:
-                        for oc in mk["outcomes"]:
-                            out[oc["name"]] = oc["price"]
-            return out or synthetic()
-        except Exception as e:
-            print("odds fetch failed, using synthetic:", e)
-    return synthetic()
-
-
-_TEAMS = ["Argentina", "France", "Brazil", "England", "Spain", "Germany"]
-
-
-def synthetic():
-    return {t: round(random.uniform(1.5, 5.0), 2) for t in _TEAMS}
-
-
-def poller():
-    global ODDS
-    while True:
-        ODDS = fetch_odds()
-        socketio.emit("odds", ODDS)
-        socketio.sleep(60)
+# --- odds (static team list) 
+ODDS = {  # team -> decimal odds; static for now
+    "Argentina": 2.5, "France": 2.8, "Brazil": 3.0,
+    "England": 4.0, "Spain": 4.5, "Germany": 5.0,
+}
 
 
 @socketio.on("connect")
@@ -152,7 +117,7 @@ def on_connect():
     emit("aggregates", aggregates())
 
 
-# --- serve built React --------------------------------------------------
+# --- serve built React 
 @app.get("/")
 @app.get("/<path:path>")
 def spa(path=""):
@@ -166,7 +131,5 @@ def spa(path=""):
 
 if __name__ == "__main__":
     init_db()
-    ODDS = synthetic()  # seed immediately so first client sees data
-    socketio.start_background_task(poller)
     port = int(os.environ.get("PORT", 5000))
     socketio.run(app, host="0.0.0.0", port=port, debug=True, allow_unsafe_werkzeug=True)
