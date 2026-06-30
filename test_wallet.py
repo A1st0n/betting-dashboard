@@ -23,4 +23,15 @@ assert r.status_code == 200 and r.get_json()["balance"] == 50, "funded bet shoul
 
 # can't overspend what's left
 assert c.post("/api/bet", json={"team": "Brazil", "amount": 999}).status_code == 402
+
+# second user's bets stay separate from the first's history
+c2 = app.app.test_client()
+c2.post("/api/signup", json={"username": "bob", "password": "pw"})
+c2.post("/api/deposit", json={"amount": 100})
+c2.post("/api/bet", json={"team": "France", "amount": 20})
+with app.app.app_context():
+    esosa = app.User.query.filter_by(username="esosa").first()
+    bob = app.User.query.filter_by(username="bob").first()
+    assert app.aggregates(esosa.id)["total"] == 50, "esosa sees only her own spend"
+    assert app.aggregates(bob.id)["total"] == 20, "bob sees only his own spend"
 print("ok")

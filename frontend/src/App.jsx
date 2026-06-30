@@ -84,6 +84,13 @@ export default function App() {
     };
   }, []);
 
+  // re-handshake when login state changes so the server sees the right user's cookie
+  useEffect(() => {
+    if (user === undefined) return;
+    socket.disconnect();
+    socket.connect();
+  }, [user]);
+
   if (user === undefined) return <LoadingScreen />;
   if (!user)
     return (

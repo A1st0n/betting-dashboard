@@ -5,7 +5,7 @@ import os, time, json, mimetypes
 import requests
 from flask import Flask, request, session, jsonify, send_from_directory
 from flask_sqlalchemy import SQLAlchemy
-from flask_socketio import SocketIO, emit
+from flask_socketio import SocketIO, emit, join_room
 from sqlalchemy import func
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -46,12 +46,14 @@ class Bet(db.Model):
     ts = db.Column(db.Float)
 
 
-def aggregates():
-    """Total mock money spent, broken down by team  what the dashboard shows."""
-    total = db.session.query(func.coalesce(func.sum(Bet.amount), 0)).scalar()
+def aggregates(user_id):
+    """One user's mock spend, broken down by team  what the dashboard shows."""
+    total = (db.session.query(func.coalesce(func.sum(Bet.amount), 0))
+             .filter(Bet.user_id == user_id).scalar())
     rows = (db.session.query(Bet.team,
                              func.sum(Bet.amount).label("spent"),
                              func.count().label("n"))
+            .filter(Bet.user_id == user_id)
             .group_by(Bet.team).order_by(func.sum(Bet.amount).desc()).all())
     return {"total": total,
             "by_team": [{"team": t, "spent": s, "n": n} for t, s, n in rows]}
@@ -133,7 +135,7 @@ def place_bet():
     db.session.add(Bet(user_id=user.id, match=match, team=team,
                        amount=amount, odds=ODDS.get(team, 2.0), ts=time.time()))
     db.session.commit()
-    socketio.emit("aggregates", aggregates())  # live push to everyone
+    socketio.emit("aggregates", aggregates(user.id), room=session["user"])  # live push to this user only
     return jsonify(ok=True, balance=user.balance)
 
 
@@ -189,7 +191,13 @@ def refresh_odds():
 def on_connect():
     refresh_odds()  # cheap: only hits the API if cache is >24h old
     emit("odds", ODDS)
-    emit("aggregates", aggregates())
+    u = session.get("user")  # handshake carries the login cookie
+    if u:
+        join_room(u)  # bets push back to this room only
+        user = User.query.filter_by(username=u).first()
+        emit("aggregates", aggregates(user.id))
+    else:
+        emit("aggregates", {"total": 0, "by_team": []})
 
 
 # --- serve built React 
