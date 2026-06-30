@@ -1,7 +1,7 @@
 """World Cup betting-spend dashboard: Flask + SocketIO + SQLite.
 
 Run Here:  pip install -r requirements.txt  &&  python app.py"""
-import os, time, json
+import os, time, json, mimetypes
 import requests
 from flask import Flask, request, session, jsonify, send_from_directory
 from flask_sqlalchemy import SQLAlchemy
@@ -11,6 +11,8 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 DB = os.path.join(os.path.dirname(__file__), "app.db")
 DIST = os.path.join(os.path.dirname(__file__), "frontend", "dist")
+
+mimetypes.add_type("application/javascript", ".js")
 
 # load .env (ponytail: 4 lines beats adding python-dotenv)
 _envf = os.path.join(os.path.dirname(__file__), ".env")
@@ -117,6 +119,16 @@ def place_bet():
 ODDS_CACHE = os.path.join(os.path.dirname(__file__), "odds_cache.json")
 ODDS_TTL = 24 * 3600
 ODDS = {}  # team -> decimal odds
+DEMO_ODDS = {
+    "Brazil": 4.5,
+    "France": 5.0,
+    "Argentina": 6.0,
+    "England": 7.0,
+    "Spain": 8.0,
+    "Germany": 10.0,
+    "Portugal": 12.0,
+    "Netherlands": 14.0,
+}
 
 
 def load_odds():
@@ -126,7 +138,7 @@ def load_odds():
     fresh = cached and time.time() - os.path.getmtime(ODDS_CACHE) < ODDS_TTL
     key = os.environ.get("ODDS_API_KEY")
     if fresh or not key:
-        return cached  # within 24h, or no key -> reuse what we have
+        return cached or DEMO_ODDS  # no key/cache: keep the local demo usable
     try:
         r = requests.get(
             "https://api.the-odds-api.com/v4/sports/soccer_fifa_world_cup/odds",
@@ -143,7 +155,7 @@ def load_odds():
             return out
     except Exception as e:
         print("odds fetch failed, using cache:", e)
-    return cached
+    return cached or DEMO_ODDS
 
 
 def refresh_odds():
@@ -164,7 +176,10 @@ def on_connect():
 def spa(path=""):
     full = os.path.join(DIST, path)
     if path and os.path.isfile(full):
-        return send_from_directory(DIST, path)
+        response = send_from_directory(DIST, path)
+        if path.endswith(".js"):
+            response.mimetype = "application/javascript"
+        return response
     if os.path.isfile(os.path.join(DIST, "index.html")):
         return send_from_directory(DIST, "index.html")
     return ("Frontend not built yet. Run: cd frontend && npm install && npm run build", 200)

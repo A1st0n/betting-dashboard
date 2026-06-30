@@ -12,4 +12,5 @@ os.utime(app.ODDS_CACHE, (old, old))
 assert app.load_odds() == {"Brazil": 3.0}, "no key -> keep last cache"
 
 os.remove(app.ODDS_CACHE)
+assert app.load_odds() == app.DEMO_ODDS, "no key/cache -> use demo odds"
 print("ok")

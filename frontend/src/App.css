@@ -1,0 +1,439 @@
+:root {
+  color: #18212f;
+  background: #f4f7fb;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
+  font-synthesis: none;
+  line-height: 1.5;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  background:
+    linear-gradient(180deg, #f8fafc 0%, #eef4f8 44%, #f4f7fb 100%);
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  border: 0;
+}
+
+.app-shell {
+  width: min(1180px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 28px 0 40px;
+}
+
+.topbar,
+.stat-card,
+.panel,
+.auth-panel {
+  border: 1px solid #d9e2ec;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 18px 45px rgba(24, 33, 47, 0.08);
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px;
+  border-radius: 8px;
+}
+
+.brand,
+.topbar-actions,
+.status-pill,
+.user-pill,
+.stat-card,
+.panel-header,
+.primary-button,
+.secondary-button,
+.icon-button,
+.form-error,
+.empty-state {
+  display: flex;
+  align-items: center;
+}
+
+.brand {
+  gap: 14px;
+  min-width: 0;
+}
+
+.brand h1,
+.auth-panel h1 {
+  margin: 0;
+  color: #111827;
+  font-size: 1.55rem;
+  line-height: 1.15;
+}
+
+.brand p,
+.panel-header p,
+.stat-card p,
+.auth-panel p {
+  margin: 4px 0 0;
+  color: #64748b;
+  font-size: 0.9rem;
+}
+
+.brand-mark {
+  display: inline-grid;
+  width: 46px;
+  height: 46px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 8px;
+  color: #ffffff;
+  background: #0f766e;
+}
+
+.topbar-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.status-pill,
+.user-pill {
+  min-height: 36px;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 999px;
+  color: #475569;
+  background: #eef2f7;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.status-pill.is-live {
+  color: #047857;
+  background: #dcfce7;
+}
+
+.icon-button {
+  width: 36px;
+  height: 36px;
+  justify-content: center;
+  border-radius: 8px;
+  color: #334155;
+  background: #edf2f7;
+  cursor: pointer;
+}
+
+.icon-button:hover,
+.secondary-button:hover {
+  background: #e2e8f0;
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin: 18px 0;
+}
+
+.stat-card {
+  min-height: 94px;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 8px;
+}
+
+.stat-icon,
+.panel-icon {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 8px;
+  color: #1d4ed8;
+  background: #dbeafe;
+}
+
+.stat-icon {
+  width: 40px;
+  height: 40px;
+}
+
+.stat-card strong {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  color: #111827;
+  font-size: 1.35rem;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr);
+  gap: 18px;
+}
+
+.panel {
+  min-width: 0;
+  padding: 18px;
+  border-radius: 8px;
+}
+
+.wide-panel {
+  grid-column: 1 / -1;
+}
+
+.panel-header {
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.panel-header h2 {
+  margin: 0;
+  color: #111827;
+  font-size: 1.05rem;
+}
+
+.panel-icon {
+  width: 36px;
+  height: 36px;
+}
+
+.bet-list,
+.odds-list {
+  display: grid;
+  gap: 10px;
+}
+
+.bet-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 96px auto;
+  gap: 10px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.team-meta {
+  min-width: 0;
+}
+
+.team-meta strong {
+  display: block;
+  overflow: hidden;
+  color: #172033;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-meta span {
+  color: #64748b;
+  font-size: 0.86rem;
+}
+
+.bet-row input,
+.auth-panel input {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 9px 10px;
+  color: #111827;
+  background: #ffffff;
+  outline: none;
+}
+
+.bet-row input:focus,
+.auth-panel input:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.16);
+}
+
+.primary-button,
+.secondary-button {
+  min-height: 40px;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.primary-button {
+  color: #ffffff;
+  background: #2563eb;
+}
+
+.primary-button:hover {
+  background: #1d4ed8;
+}
+
+.primary-button:disabled,
+.secondary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.secondary-button {
+  color: #334155;
+  background: #edf2f7;
+}
+
+.row-message {
+  grid-column: 1 / -1;
+  color: #047857;
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.metric-row {
+  display: grid;
+  gap: 7px;
+}
+
+.metric-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  color: #334155;
+  font-size: 0.9rem;
+}
+
+.metric-label span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.metric-label strong {
+  color: #0f766e;
+}
+
+.meter {
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e2e8f0;
+}
+
+.meter span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #10b981;
+}
+
+.chart-wrap {
+  width: 100%;
+  min-height: 260px;
+}
+
+.empty-state {
+  min-height: 120px;
+  justify-content: center;
+  gap: 10px;
+  padding: 18px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  color: #64748b;
+  background: #f8fafc;
+  text-align: center;
+}
+
+.auth-shell {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+}
+
+.auth-panel {
+  width: min(390px, 100%);
+  padding: 26px;
+  border-radius: 8px;
+}
+
+.auth-mark {
+  margin-bottom: 16px;
+}
+
+.auth-panel label {
+  display: grid;
+  gap: 7px;
+  margin-top: 14px;
+  color: #334155;
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.auth-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.form-error {
+  gap: 8px;
+  margin: 12px 0 0;
+  color: #b91c1c;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+@media (max-width: 860px) {
+  .topbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .topbar-actions {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .stat-grid,
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .app-shell {
+    width: min(100% - 20px, 1180px);
+    padding-top: 10px;
+  }
+
+  .brand h1,
+  .auth-panel h1 {
+    font-size: 1.28rem;
+  }
+
+  .stat-card {
+    min-height: 80px;
+  }
+
+  .bet-row {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-actions {
+    grid-template-columns: 1fr;
+  }
+}
