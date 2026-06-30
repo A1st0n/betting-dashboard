@@ -49,6 +49,27 @@ export default function App() {
         </section>
 
         <section style={S.col}>
+          <h3>Live odds: implied win chance</h3>
+          {Object.keys(odds).length === 0 && <p>No odds yet.</p>}
+          {Object.entries(odds)
+            .map(([team, price]) => [team, price, 1 / price])
+            .sort((a, b) => b[2] - a[2])
+            .map(([team, price, impl]) => {
+              const sum = Object.values(odds).reduce((s, p) => s + 1 / p, 0) || 1;
+              const pct = (impl / sum) * 100;
+              return (
+                <div key={team} style={{ margin: "8px 0" }}>
+                  <div style={S.barLabel}>
+                    <span>{team} <small>@ {price}</small></span>
+                    <span>{pct.toFixed(1)}%</span>
+                  </div>
+                  <div style={{ ...S.bar, background: "#16a34a", width: `${pct}%` }} />
+                </div>
+              );
+            })}
+        </section>
+
+        <section style={S.col}>
           <h3>Spend by team (everyone, live)</h3>
           {agg.by_team.length === 0 && <p>No bets yet — place one.</p>}
           {agg.by_team.map((t) => {

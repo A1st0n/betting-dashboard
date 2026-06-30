@@ -1,7 +1,8 @@
 """World Cup betting-spend dashboard: Flask + SocketIO + SQLite.
 
 Run Here:  pip install -r requirements.txt  &&  python app.py"""
-import os, time
+import os, time, json
+import requests
 from flask import Flask, request, session, jsonify, send_from_directory
 from flask_sqlalchemy import SQLAlchemy
 from flask_socketio import SocketIO, emit
@@ -10,6 +11,14 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 DB = os.path.join(os.path.dirname(__file__), "app.db")
 DIST = os.path.join(os.path.dirname(__file__), "frontend", "dist")
+
+# load .env (ponytail: 4 lines beats adding python-dotenv)
+_envf = os.path.join(os.path.dirname(__file__), ".env")
+if os.path.exists(_envf):
+    for _l in open(_envf):
+        if "=" in _l and not _l.lstrip().startswith("#"):
+            _k, _v = _l.strip().split("=", 1)
+            os.environ.setdefault(_k, _v)
 
 app = Flask(__name__, static_folder=None)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-change-me")  # ponytail: fine for a demo; set SECRET_KEY in prod
@@ -104,15 +113,47 @@ def place_bet():
     return jsonify(ok=True)
 
 
-# --- odds (static team list) 
-ODDS = {  # team -> decimal odds; static for now
-    "Argentina": 2.5, "France": 2.8, "Brazil": 3.0,
-    "England": 4.0, "Spain": 4.5, "Germany": 5.0,
-}
+# --- odds (the-odds-api, cached, max 1 fetch / 24h) ---------------------
+ODDS_CACHE = os.path.join(os.path.dirname(__file__), "odds_cache.json")
+ODDS_TTL = 24 * 3600
+ODDS = {}  # team -> decimal odds
+
+
+def load_odds():
+    """Cached odds, refetched at most once per 24h.
+    ponytail: file mtime IS the rate-limit clock  survives restarts, no scheduler."""
+    cached = json.load(open(ODDS_CACHE)) if os.path.exists(ODDS_CACHE) else {}
+    fresh = cached and time.time() - os.path.getmtime(ODDS_CACHE) < ODDS_TTL
+    key = os.environ.get("ODDS_API_KEY")
+    if fresh or not key:
+        return cached  # within 24h, or no key -> reuse what we have
+    try:
+        r = requests.get(
+            "https://api.the-odds-api.com/v4/sports/soccer_fifa_world_cup/odds",
+            params={"apiKey": key, "regions": "us", "markets": "h2h"}, timeout=10)
+        r.raise_for_status()
+        out = {}
+        for game in r.json():
+            for bm in game.get("bookmakers", [])[:1]:
+                for mk in bm.get("markets", []):
+                    for oc in mk.get("outcomes", []):
+                        out[oc["name"]] = oc["price"]
+        if out:
+            json.dump(out, open(ODDS_CACHE, "w"))
+            return out
+    except Exception as e:
+        print("odds fetch failed, using cache:", e)
+    return cached
+
+
+def refresh_odds():
+    global ODDS
+    ODDS = load_odds()
 
 
 @socketio.on("connect")
 def on_connect():
+    refresh_odds()  # cheap: only hits the API if cache is >24h old
     emit("odds", ODDS)
     emit("aggregates", aggregates())
 
@@ -132,5 +173,6 @@ def spa(path=""):
 if __name__ == "__main__":
     with app.app_context():
         db.create_all()
+    refresh_odds()  # seed odds at startup (fetches only if cache stale/absent)
     port = int(os.environ.get("PORT", 5000))
     socketio.run(app, host="0.0.0.0", port=port, debug=True, allow_unsafe_werkzeug=True)
