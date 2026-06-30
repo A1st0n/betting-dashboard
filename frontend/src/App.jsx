@@ -6,11 +6,14 @@ import {
   CircleDollarSign,
   LogIn,
   LogOut,
+  Plus,
   Trophy,
   User,
   UserPlus,
+  Wallet,
   Wifi,
   WifiOff,
+  X,
 } from "lucide-react";
 import {
   Bar,
@@ -44,6 +47,7 @@ async function api(path, body) {
 
 export default function App() {
   const [user, setUser] = useState(undefined);
+  const [balance, setBalance] = useState(0);
   const [odds, setOdds] = useState({});
   const [agg, setAgg] = useState({ total: 0, by_team: [] });
   const [connected, setConnected] = useState(socket.connected);
@@ -53,7 +57,11 @@ export default function App() {
 
     fetch("/api/me")
       .then((r) => r.json())
-      .then((d) => active && setUser(d.username))
+      .then((d) => {
+        if (!active) return;
+        setUser(d.username);
+        setBalance(Number(d.balance || 0));
+      })
       .catch(() => active && setUser(null));
 
     const handleOdds = (data) => setOdds(data || {});
@@ -77,20 +85,31 @@ export default function App() {
   }, []);
 
   if (user === undefined) return <LoadingScreen />;
-  if (!user) return <Auth onAuth={setUser} />;
+  if (!user)
+    return (
+      <Auth
+        onAuth={(name, bal) => {
+          setUser(name);
+          setBalance(Number(bal || 0));
+        }}
+      />
+    );
 
   return (
     <Dashboard
       agg={agg}
+      balance={balance}
       connected={connected}
       odds={odds}
       user={user}
+      onBalance={setBalance}
       onLogout={() => setUser(null)}
     />
   );
 }
 
-function Dashboard({ agg, connected, odds, user, onLogout }) {
+function Dashboard({ agg, balance, connected, odds, user, onBalance, onLogout }) {
+  const [showDeposit, setShowDeposit] = useState(false);
   const oddsRows = useMemo(() => {
     const rows = Object.entries(odds)
       .map(([team, price]) => ({
@@ -151,6 +170,16 @@ function Dashboard({ agg, connected, odds, user, onLogout }) {
             )}
             {connected ? "Live" : "Reconnecting"}
           </span>
+          <button
+            className="wallet-pill"
+            onClick={() => setShowDeposit(true)}
+            title="Add funds"
+            type="button"
+          >
+            <Wallet size={16} aria-hidden="true" />
+            {money.format(balance)}
+            <Plus size={14} aria-hidden="true" />
+          </button>
           <span className="user-pill">
             <User size={16} aria-hidden="true" />
             {user}
@@ -196,12 +225,20 @@ function Dashboard({ agg, connected, odds, user, onLogout }) {
             icon={<CircleDollarSign size={18} aria-hidden="true" />}
             title="Place a mock bet"
           />
+          {balance <= 0 && (
+            <EmptyState message="Add funds to your wallet before placing a bet." />
+          )}
           {oddsRows.length === 0 ? (
             <EmptyState message="No odds loaded yet. Check the API key or odds cache." />
           ) : (
             <div className="bet-list">
               {oddsRows.map((row) => (
-                <BetRow key={row.team} row={row} />
+                <BetRow
+                  key={row.team}
+                  row={row}
+                  balance={balance}
+                  onBalance={onBalance}
+                />
               ))}
             </div>
           )}
@@ -225,6 +262,95 @@ function Dashboard({ agg, connected, odds, user, onLogout }) {
           <SpendChart rows={spendRows} />
         </section>
       </main>
+
+      {showDeposit && (
+        <DepositModal
+          onClose={() => setShowDeposit(false)}
+          onBalance={onBalance}
+        />
+      )}
+    </div>
+  );
+}
+
+function DepositModal({ onClose, onBalance }) {
+  const [amount, setAmount] = useState("");
+  const [error, setError] = useState("");
+  const [pending, setPending] = useState(false);
+  const value = Number(amount);
+
+  async function submit(event) {
+    event.preventDefault();
+    if (!(value > 0)) return;
+    setPending(true);
+    setError("");
+    try {
+      const data = await api("/deposit", { amount: value });
+      onBalance(Number(data.balance || 0));
+      onClose();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <Modal onClose={onClose} title="Add mock funds">
+      <form onSubmit={submit}>
+        <label>
+          Amount
+          <input
+            autoFocus
+            min="1"
+            onChange={(event) => setAmount(event.target.value)}
+            placeholder="$100"
+            type="number"
+            value={amount}
+          />
+        </label>
+        {error && (
+          <p className="form-error">
+            <AlertCircle size={16} aria-hidden="true" />
+            {error}
+          </p>
+        )}
+        <button
+          className="primary-button"
+          disabled={pending || !(value > 0)}
+          type="submit"
+        >
+          <Wallet size={16} aria-hidden="true" />
+          {pending ? "Adding" : "Add funds"}
+        </button>
+      </form>
+    </Modal>
+  );
+}
+
+function Modal({ title, onClose, children }) {
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div
+        className="modal-card"
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+      >
+        <div className="modal-header">
+          <h2>{title}</h2>
+          <button
+            className="icon-button"
+            onClick={onClose}
+            title="Close"
+            type="button"
+          >
+            <X size={18} aria-hidden="true" />
+          </button>
+        </div>
+        {children}
+      </div>
     </div>
   );
 }
@@ -253,12 +379,14 @@ function PanelHeader({ eyebrow, icon, title }) {
   );
 }
 
-function BetRow({ row }) {
+function BetRow({ row, balance, onBalance }) {
   const [amount, setAmount] = useState("");
   const [message, setMessage] = useState("");
   const [pending, setPending] = useState(false);
   const amountValue = Number(amount);
-  const canSubmit = Number.isFinite(amountValue) && amountValue > 0 && !pending;
+  const enoughFunds = amountValue <= balance;
+  const canSubmit =
+    Number.isFinite(amountValue) && amountValue > 0 && enoughFunds && !pending;
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -268,13 +396,14 @@ function BetRow({ row }) {
     setMessage("");
 
     try {
-      await api("/bet", {
+      const data = await api("/bet", {
         team: row.team,
         match: "World Cup",
         amount: amountValue,
       });
       setAmount("");
       setMessage("Bet placed");
+      onBalance(Number(data.balance || 0));
     } catch (error) {
       setMessage(error.message);
     } finally {
@@ -300,6 +429,9 @@ function BetRow({ row }) {
         <CircleDollarSign size={16} aria-hidden="true" />
         {pending ? "Placing" : "Bet"}
       </button>
+      {amountValue > 0 && !enoughFunds && (
+        <span className="row-message">Not enough funds</span>
+      )}
       {message && <span className="row-message">{message}</span>}
     </form>
   );
@@ -372,14 +504,15 @@ function Auth({ onAuth }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
+  const [showSignup, setShowSignup] = useState(false);
 
-  async function submit(path) {
+  async function login(event) {
+    event.preventDefault();
     setPending(true);
     setError("");
-
     try {
-      const data = await api(path, { username, password });
-      onAuth(data.username);
+      const data = await api("/login", { username, password });
+      onAuth(data.username, data.balance);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -389,12 +522,12 @@ function Auth({ onAuth }) {
 
   return (
     <main className="auth-shell">
-      <section className="auth-panel">
+      <form className="auth-panel" onSubmit={login}>
         <span className="brand-mark auth-mark">
           <Trophy size={24} aria-hidden="true" />
         </span>
         <h1>World Cup Betting Spend</h1>
-        <p>Sign in or create a local account to place mock bets.</p>
+        <p>Log in to place mock bets.</p>
 
         <label>
           Username
@@ -424,27 +557,103 @@ function Auth({ onAuth }) {
         )}
 
         <div className="auth-actions">
-          <button
-            className="primary-button"
-            disabled={pending}
-            onClick={() => submit("/login")}
-            type="button"
-          >
+          <button className="primary-button" disabled={pending} type="submit">
             <LogIn size={16} aria-hidden="true" />
             Log in
           </button>
           <button
             className="secondary-button"
             disabled={pending}
-            onClick={() => submit("/signup")}
+            onClick={() => setShowSignup(true)}
             type="button"
           >
             <UserPlus size={16} aria-hidden="true" />
             Sign up
           </button>
         </div>
-      </section>
+      </form>
+
+      {showSignup && (
+        <SignupModal onAuth={onAuth} onClose={() => setShowSignup(false)} />
+      )}
     </main>
+  );
+}
+
+function SignupModal({ onAuth, onClose }) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [error, setError] = useState("");
+  const [pending, setPending] = useState(false);
+
+  async function submit(event) {
+    event.preventDefault();
+    if (password !== confirm) {
+      setError("passwords do not match");
+      return;
+    }
+    setPending(true);
+    setError("");
+    try {
+      const data = await api("/signup", { username, password });
+      onAuth(data.username, data.balance);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <Modal onClose={onClose} title="Create your account">
+      <form onSubmit={submit}>
+        <label>
+          Username
+          <input
+            autoComplete="username"
+            autoFocus
+            onChange={(event) => setUsername(event.target.value)}
+            placeholder="esosa"
+            value={username}
+          />
+        </label>
+        <label>
+          Password
+          <input
+            autoComplete="new-password"
+            onChange={(event) => setPassword(event.target.value)}
+            placeholder="Choose a password"
+            type="password"
+            value={password}
+          />
+        </label>
+        <label>
+          Confirm password
+          <input
+            autoComplete="new-password"
+            onChange={(event) => setConfirm(event.target.value)}
+            placeholder="Repeat password"
+            type="password"
+            value={confirm}
+          />
+        </label>
+        {error && (
+          <p className="form-error">
+            <AlertCircle size={16} aria-hidden="true" />
+            {error}
+          </p>
+        )}
+        <button
+          className="primary-button"
+          disabled={pending || !username || !password}
+          type="submit"
+        >
+          <UserPlus size={16} aria-hidden="true" />
+          {pending ? "Creating" : "Create account"}
+        </button>
+      </form>
+    </Modal>
   );
 }
 

@@ -9,7 +9,7 @@ from flask_socketio import SocketIO, emit
 from sqlalchemy import func
 from werkzeug.security import generate_password_hash, check_password_hash
 
-DB = os.path.join(os.path.dirname(__file__), "app.db")
+DB = os.environ.get("APP_DB", os.path.join(os.path.dirname(__file__), "app.db"))
 DIST = os.path.join(os.path.dirname(__file__), "frontend", "dist")
 
 mimetypes.add_type("application/javascript", ".js")
@@ -33,6 +33,7 @@ class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String, unique=True, nullable=False)
     pw_hash = db.Column(db.String, nullable=False)
+    balance = db.Column(db.Float, nullable=False, default=0.0)  # mock wallet funds
 
 
 class Bet(db.Model):
@@ -69,7 +70,7 @@ def signup():
                         pw_hash=generate_password_hash(p, method="pbkdf2:sha256")))  # salted
     db.session.commit()
     session["user"] = u
-    return jsonify(username=u)
+    return jsonify(username=u, balance=0.0)
 
 
 @app.post("/api/login")
@@ -80,7 +81,7 @@ def login():
     if not user or not check_password_hash(user.pw_hash, p):
         return jsonify(error="bad credentials"), 401
     session["user"] = u
-    return jsonify(username=u)
+    return jsonify(username=u, balance=user.balance)
 
 
 @app.post("/api/logout")
@@ -91,7 +92,25 @@ def logout():
 
 @app.get("/api/me")
 def me():
-    return jsonify(username=session.get("user"))
+    u = session.get("user")
+    user = User.query.filter_by(username=u).first() if u else None
+    return jsonify(username=u, balance=user.balance if user else 0.0)
+
+
+@app.post("/api/deposit")
+def deposit():
+    if "user" not in session:
+        return jsonify(error="login required"), 401
+    try:
+        amount = float(request.get_json(force=True)["amount"])
+    except (KeyError, ValueError, TypeError):
+        return jsonify(error="amount must be a number"), 400
+    if amount <= 0:
+        return jsonify(error="amount must be positive"), 400
+    user = User.query.filter_by(username=session["user"]).first()
+    user.balance += amount
+    db.session.commit()
+    return jsonify(balance=user.balance)
 
 
 # --- bets 
@@ -108,11 +127,14 @@ def place_bet():
         return jsonify(error="amount must be positive"), 400
     match, team = d.get("match", ""), d.get("team", "")
     user = User.query.filter_by(username=session["user"]).first()
+    if amount > user.balance:  # mock funds gate: no betting on credit
+        return jsonify(error="insufficient funds"), 402
+    user.balance -= amount
     db.session.add(Bet(user_id=user.id, match=match, team=team,
                        amount=amount, odds=ODDS.get(team, 2.0), ts=time.time()))
     db.session.commit()
     socketio.emit("aggregates", aggregates())  # live push to everyone
-    return jsonify(ok=True)
+    return jsonify(ok=True, balance=user.balance)
 
 
 # --- odds (the-odds-api, cached, max 1 fetch / 24h) ---------------------
@@ -185,9 +207,18 @@ def spa(path=""):
     return ("Frontend not built yet. Run: cd frontend && npm install && npm run build", 200)
 
 
+def ensure_schema():
+    """Add the wallet column to a pre-existing DB. ponytail: one ALTER beats Alembic."""
+    db.create_all()
+    cols = [r[1] for r in db.session.execute(db.text("PRAGMA table_info(user)"))]
+    if "balance" not in cols:
+        db.session.execute(db.text("ALTER TABLE user ADD COLUMN balance FLOAT NOT NULL DEFAULT 0"))
+        db.session.commit()
+
+
 if __name__ == "__main__":
     with app.app_context():
-        db.create_all()
+        ensure_schema()
     refresh_odds()  # seed odds at startup (fetches only if cache stale/absent)
     port = int(os.environ.get("PORT", 5000))
     socketio.run(app, host="0.0.0.0", port=port, debug=True, allow_unsafe_werkzeug=True)
