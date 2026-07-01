@@ -6,5 +6,4 @@ games_cache.json
 stats_cache.json
 .venv/
 frontend/node_modules/
-frontend/dist/
 .env

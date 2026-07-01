@@ -363,4 +363,5 @@ if __name__ == "__main__":
     refresh_games()
     refresh_stats()
     port = int(os.environ.get("PORT", 5000))
-    socketio.run(app, host="0.0.0.0", port=port, debug=True, allow_unsafe_werkzeug=True)
+    socketio.run(app, host="0.0.0.0", port=port,
+                 debug=bool(os.environ.get("DEBUG")), allow_unsafe_werkzeug=True)
