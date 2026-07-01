@@ -63,7 +63,7 @@ def aggregates(user_id):
             "by_team": [{"team": t, "spent": s, "n": n} for t, s, n in rows]}
 
 
-# --- auth ---------------------------------------------------------------
+# --- auth /////////////////////////////////////////////
 @app.post("/api/signup")
 def signup():
     d = request.get_json(force=True)
@@ -150,7 +150,7 @@ def place_bet():
 
 # --- odds (the-odds-api, cached, max 1 fetch / 24h) ---------------------
 ODDS_CACHE = os.path.join(os.path.dirname(__file__), "odds_cache.json")
-ODDS_TTL = 24 * 3600
+ODDS_TTL = 24 * 300  # ponytail: 1 fetch/300s to stay in free quota; lower it if you need live odds to tick
 ODDS = {}  # team -> decimal odds
 DEMO_ODDS = {
     "Brazil": 4.5,
@@ -198,7 +198,7 @@ def refresh_odds():
 
 # --- games (the-odds-api /scores: live + upcoming + completed last 3 days) == pulled from the oddsapi docs
 GAMES_CACHE = os.path.join(os.path.dirname(__file__), "games_cache.json")
-GAMES_TTL = 24 * 3600  # ponytail: 1 fetch/day to stay in free quota; lower it if you need live scores to tick
+GAMES_TTL = 24 * 300  # ponytail: 1 fetch/300s to stay in free quota; lower it if you need live scores to tick
 GAMES = []      # raw game dicts from the API (status computed at emit time)
 
 
