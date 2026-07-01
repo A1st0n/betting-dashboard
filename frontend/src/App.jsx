@@ -260,7 +260,7 @@ function Dashboard({ agg, balance, board, connected, games, odds, props, stats, 
       <main className="dashboard-grid">
         <section className="panel wide-panel">
           <PanelHeader
-            eyebrow="Live, upcoming & finished in the last 3 days"
+            eyebrow="Live scores from worldcup26.ir"
             icon={<Trophy size={18} aria-hidden="true" />}
             title="Games"
           />
@@ -277,7 +277,7 @@ function Dashboard({ agg, balance, board, connected, games, odds, props, stats, 
             <EmptyState message="Add funds to your wallet before placing a bet." />
           )}
           {oddsRows.length === 0 ? (
-            <EmptyState message="No odds loaded yet. Check the API key or odds cache." />
+            <EmptyState message="No odds loaded yet. Check the World Cup API connection." />
           ) : (
             <div className="bet-list">
               {oddsRows.map((row) => (
@@ -294,7 +294,7 @@ function Dashboard({ agg, balance, board, connected, games, odds, props, stats, 
 
         <section className="panel">
           <PanelHeader
-            eyebrow="Normalized from decimal odds"
+            eyebrow="Derived from group standings"
             icon={<BarChart3 size={18} aria-hidden="true" />}
             title="Implied win chance"
           />
@@ -312,7 +312,7 @@ function Dashboard({ agg, balance, board, connected, games, odds, props, stats, 
 
         <section className="panel wide-panel">
           <PanelHeader
-            eyebrow="Player leaderboards · Opta via theanalyst.com"
+            eyebrow="Scorers & standings · worldcup26.ir"
             icon={<BarChart3 size={18} aria-hidden="true" />}
             title="Player stats"
           />
@@ -321,7 +321,7 @@ function Dashboard({ agg, balance, board, connected, games, odds, props, stats, 
 
         <section className="panel bet-panel">
           <PanelHeader
-            eyebrow="Derived from Opta rates · $10 mock stake"
+            eyebrow="From match scorers · $10 mock stake"
             icon={<CircleDollarSign size={18} aria-hidden="true" />}
             title="Player props"
           />
@@ -475,7 +475,7 @@ function StatsPanel({ stats }) {
   const rows = (active && stats[active]) || [];
 
   if (!boards.length) {
-    return <EmptyState message="Player stats load once the feed is fetched." />;
+    return <EmptyState message="Player stats load once World Cup data is fetched." />;
   }
 
   return (
@@ -518,7 +518,9 @@ function GamesPanel({ games }) {
     <div className="games-list">
       {games.map((g) => (
         <div className="game-row" key={g.id}>
-          <span className={`game-status is-${g.status}`}>{g.status}</span>
+          <span className={`game-status is-${g.status}`}>
+            {g.status === "live" && g.minute ? g.minute : g.status}
+          </span>
           <strong className="game-team">{g.home}</strong>
           <span className="game-center">
             {g.status === "upcoming"
@@ -526,6 +528,11 @@ function GamesPanel({ games }) {
               : `${g.home_score ?? "–"} : ${g.away_score ?? "–"}`}
           </span>
           <strong className="game-team game-away">{g.away}</strong>
+          {g.group && (
+            <span className="game-meta">
+              {g.stage === "group" ? `Group ${g.group}` : g.group}
+            </span>
+          )}
         </div>
       ))}
     </div>

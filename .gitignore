@@ -4,6 +4,7 @@ app.db
 odds_cache.json
 games_cache.json
 stats_cache.json
+wc_cache.json
 .venv/
 frontend/node_modules/
 .env

@@ -1,6 +1,7 @@
 """World Cup betting-spend dashboard: Flask + SocketIO + SQLite.
 
-Run Here:  pip install -r requirements.txt  &&  python app.py"""
+Live data from https://worldcup26.ir (World Cup 2026 API).
+Run: pip install -r requirements.txt && python app.py"""
 import os, time, json, mimetypes
 from datetime import datetime, timezone
 import requests
@@ -10,6 +11,9 @@ from flask_socketio import SocketIO, emit, join_room
 from sqlalchemy import func
 from werkzeug.security import generate_password_hash, check_password_hash
 from props import build_stats, build_props
+
+WC_API = os.environ.get("WC_API_URL", "https://worldcup26.ir").rstrip("/")
+WC_TOKEN = os.environ.get("WC_API_TOKEN", "")
 
 DB = os.environ.get("APP_DB", os.path.join(os.path.dirname(__file__), "app.db"))
 DIST = os.path.join(os.path.dirname(__file__), "frontend", "dist")
@@ -146,151 +150,167 @@ def place_bet():
     return jsonify(ok=True, balance=user.balance)
 
 
-# --- odds (the-odds-api, cached, max 1 fetch / 24h) ---------------------
-ODDS_CACHE = os.path.join(os.path.dirname(__file__), "odds_cache.json")
-ODDS_TTL = 24 * 3600
-ODDS = {}  # team -> decimal odds
+# --- World Cup 2026 API (worldcup26.ir) -----------------------------------
+WC_CACHE = os.path.join(os.path.dirname(__file__), "wc_cache.json")
+WC_TTL = int(os.environ.get("WC_CACHE_TTL", 120))  # live scores: refresh every 2 min
+ODDS = {}   # team -> decimal odds (derived from group standings)
+GAMES = []  # raw match dicts from /get/games
+STATS = {}
+PROPS = {}
 DEMO_ODDS = {
-    "Brazil": 4.5,
-    "France": 5.0,
-    "Argentina": 6.0,
-    "England": 7.0,
-    "Spain": 8.0,
-    "Germany": 10.0,
-    "Portugal": 12.0,
-    "Netherlands": 14.0,
+    "Brazil": 4.5, "France": 5.0, "Argentina": 6.0, "England": 7.0,
+    "Spain": 8.0, "Germany": 10.0, "Portugal": 12.0, "Netherlands": 14.0,
 }
 
 
-def load_odds():
-    """Cached odds, refetched at most once per 24h.
-    ponytail: file mtime IS the rate-limit clock  survives restarts, no scheduler."""
-    cached = json.load(open(ODDS_CACHE)) if os.path.exists(ODDS_CACHE) else {}
-    fresh = cached and time.time() - os.path.getmtime(ODDS_CACHE) < ODDS_TTL
-    key = os.environ.get("ODDS_API_KEY")
-    if fresh or not key:
-        return cached or DEMO_ODDS  # no key/cache: keep the local demo usable
+def wc_get(path):
+    """GET from the World Cup 2026 API; optional JWT via WC_API_TOKEN."""
+    headers = {"Authorization": f"Bearer {WC_TOKEN}"} if WC_TOKEN else {}
+    r = requests.get(f"{WC_API}{path}", headers=headers, timeout=15)
+    r.raise_for_status()
+    return r.json()
+
+
+def _wc_fresh():
+    return os.path.exists(WC_CACHE) and time.time() - os.path.getmtime(WC_CACHE) < WC_TTL
+
+
+def _wc_read():
+    return json.load(open(WC_CACHE)) if os.path.exists(WC_CACHE) else {}
+
+
+def _wc_write(data):
+    json.dump(data, open(WC_CACHE, "w"))
+
+
+def _parse_wc_date(raw):
+    """06/11/2026 13:00 -> ISO string for the client."""
     try:
-        r = requests.get(
-            "https://api.the-odds-api.com/v4/sports/soccer_fifa_world_cup/odds",
-            params={"apiKey": key, "regions": "us", "markets": "h2h"}, timeout=10)
-        r.raise_for_status()
-        out = {}
-        for game in r.json():
-            for bm in game.get("bookmakers", [])[:1]:
-                for mk in bm.get("markets", []):
-                    for oc in mk.get("outcomes", []):
-                        out[oc["name"]] = oc["price"]
-        if out:
-            json.dump(out, open(ODDS_CACHE, "w"))
-            return out
-    except Exception as e:
-        print("odds fetch failed, using cache:", e)
-    return cached or DEMO_ODDS
+        return datetime.strptime(raw, "%m/%d/%Y %H:%M").replace(tzinfo=timezone.utc).isoformat()
+    except (TypeError, ValueError):
+        return datetime.now(timezone.utc).isoformat()
 
 
-def refresh_odds():
-    global ODDS
-    ODDS = load_odds()
+def _wc_ts(g):
+    return datetime.fromisoformat(_parse_wc_date(g.get("local_date")).replace("Z", "+00:00")).timestamp()
 
 
-# --- games (the-odds-api /scores: live + upcoming + completed last 3 days) == pulled from the oddsapi docs
-GAMES_CACHE = os.path.join(os.path.dirname(__file__), "games_cache.json")
-GAMES_TTL = 24 * 3600  # ponytail: 1 fetch/day to stay in free quota; lower it if you need live scores to tick
-GAMES = []      # raw game dicts from the API (status computed at emit time)
+def _wc_status(g):
+    elapsed = (g.get("time_elapsed") or "").lower()
+    if (g.get("finished") or "").upper() == "TRUE" or elapsed == "finished":
+        return "final"
+    if elapsed and elapsed != "notstarted":
+        return "live"
+    return "upcoming"
 
 
-def _ts(iso):
-    return datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp()
+def _wc_team(g, side):
+    return g.get(f"{side}_team_name_en") or g.get(f"{side}_team_label") or "TBD"
+
+
+def odds_from_standings(groups, teams):
+    """Tournament-winner style decimal odds from group points (higher pts -> shorter odds)."""
+    by_id = {t["id"]: t["name_en"] for t in teams}
+    weights = {}
+    for grp in groups.get("groups", []):
+        for row in grp.get("teams", []):
+            name = by_id.get(row.get("team_id"))
+            if name:
+                weights[name] = max(int(row.get("pts") or 0), 1)
+    if not weights:
+        return {}
+    total = sum(weights.values())
+    return {name: round(total / w, 2) for name, w in weights.items()}
 
 
 def demo_games():
-    """Time-relative demo so the local app shows one of each status without a key."""
+    """Fallback when the API is unreachable."""
     now = time.time()
     iso = lambda off: datetime.fromtimestamp(now + off, timezone.utc).isoformat()
-    sc = lambda h, a, hs, as_: [{"name": h, "score": str(hs)}, {"name": a, "score": str(as_)}]
     return [
-        {"id": "d1", "home_team": "Brazil", "away_team": "Serbia",
-         "commence_time": iso(-3600), "completed": False, "scores": sc("Brazil", "Serbia", 1, 0)},
-        {"id": "d2", "home_team": "France", "away_team": "Australia",
-         "commence_time": iso(3600), "completed": False, "scores": None},
-        {"id": "d3", "home_team": "Argentina", "away_team": "Mexico",
-         "commence_time": iso(-2 * 86400), "completed": True, "scores": sc("Argentina", "Mexico", 2, 0)},
+        {"id": "d1", "local_date": "demo", "finished": "FALSE", "time_elapsed": "45'",
+         "home_team_name_en": "Brazil", "away_team_name_en": "Serbia",
+         "home_score": "1", "away_score": "0", "_commence": iso(-3600)},
+        {"id": "d2", "local_date": "demo", "finished": "FALSE", "time_elapsed": "notstarted",
+         "home_team_name_en": "France", "away_team_name_en": "Australia",
+         "home_score": "0", "away_score": "0", "_commence": iso(3600)},
+        {"id": "d3", "local_date": "demo", "finished": "TRUE", "time_elapsed": "finished",
+         "home_team_name_en": "Argentina", "away_team_name_en": "Mexico",
+         "home_score": "2", "away_score": "0", "_commence": iso(-2 * 86400)},
     ]
 
 
 def list_games(raw):
-    """Shape raw games for the client and tag each live / upcoming / final."""
+    """Shape API matches for the client; live + upcoming + finals from last 3 days."""
     now = time.time()
+    cutoff = 3 * 86400
     out = []
     for g in raw:
-        st = "final" if g.get("completed") else ("live" if _ts(g["commence_time"]) <= now else "upcoming")
-        sc = {s["name"]: s["score"] for s in (g.get("scores") or [])}
-        out.append({"id": g["id"], "home": g["home_team"], "away": g["away_team"],
-                    "commence_time": g["commence_time"], "status": st,
-                    "home_score": sc.get(g["home_team"]), "away_score": sc.get(g["away_team"])})
+        st = _wc_status(g)
+        ts = _wc_ts(g) if g.get("local_date") != "demo" else datetime.fromisoformat(
+            g["_commence"].replace("Z", "+00:00")).timestamp()
+        if st == "final" and now - ts > cutoff:
+            continue
+        commence = g.get("_commence") or _parse_wc_date(g.get("local_date"))
+        out.append({
+            "id": g.get("id"), "home": _wc_team(g, "home"), "away": _wc_team(g, "away"),
+            "commence_time": commence, "status": st,
+            "home_score": g.get("home_score"), "away_score": g.get("away_score"),
+            "group": g.get("group"), "stage": g.get("type"),
+            "minute": g.get("time_elapsed") if st == "live" else None,
+        })
     rank = {"live": 0, "upcoming": 1, "final": 2}
-    # live first, then soonest upcoming, then most-recently-finished
     out.sort(key=lambda x: (rank[x["status"]],
-                            _ts(x["commence_time"]) * (-1 if x["status"] == "final" else 1)))
+                            datetime.fromisoformat(x["commence_time"].replace("Z", "+00:00")).timestamp()
+                            * (-1 if x["status"] == "final" else 1)))
     return out
 
 
-def load_games():
-    """live + upcoming + games completed in the last 3 days, cached like odds."""
-    cached = json.load(open(GAMES_CACHE)) if os.path.exists(GAMES_CACHE) else []
-    fresh = cached and time.time() - os.path.getmtime(GAMES_CACHE) < GAMES_TTL
-    key = os.environ.get("ODDS_API_KEY")
-    if fresh or not key:
-        return cached or demo_games()
+def load_wc():
+    """Fetch games, teams, and groups; cache together for odds + stats."""
+    if _wc_fresh():
+        return _wc_read()
     try:
-        r = requests.get(
-            "https://api.the-odds-api.com/v4/sports/soccer_fifa_world_cup/scores",
-            params={"apiKey": key, "daysFrom": 3}, timeout=10)
-        r.raise_for_status()
-        games = r.json()
+        games = wc_get("/get/games").get("games", [])
+        teams = wc_get("/get/teams")
+        if isinstance(teams, dict):
+            teams = teams.get("teams", [])
+        groups = wc_get("/get/groups")
         if games:
-            json.dump(games, open(GAMES_CACHE, "w"))
-            return games
+            data = {"games": games, "teams": teams, "groups": groups}
+            _wc_write(data)
+            return data
     except Exception as e:
-        print("games fetch failed, using cache:", e)
-    return cached or demo_games()
+        print("world cup API fetch failed:", e)
+    cached = _wc_read()
+    if cached.get("games"):
+        return cached
+    return {"games": demo_games(), "teams": [], "groups": {}}
+
+
+def refresh_odds():
+    global ODDS
+    data = load_wc()
+    ODDS = odds_from_standings(data.get("groups", {}), data.get("teams", [])) or DEMO_ODDS
 
 
 def refresh_games():
     global GAMES
-    GAMES = load_games()
-
-
-# --- player stats + props (theanalyst.com's public Opta feed) -----------
-# ponytail: current WC tournament id; scrape it off the stats page when it rolls over.
-STATS_TMCL = "873cbl9cd9butm4air0mugxzo"
-STATS_URL = f"https://dataviz.theanalyst.com/project-data/soccer/{STATS_TMCL}/player-stats.json"
-STATS_CACHE = os.path.join(os.path.dirname(__file__), "stats_cache.json")
-STATS_TTL = 24 * 3600
-STATS = {}  # label -> top-N player rows
-PROPS = {}  # market -> player prop lines (derived from the same feed)
+    GAMES = load_wc().get("games", demo_games())
 
 
 def load_stats():
-    """Leaderboards + props from one cached fetch, refreshed at most once/24h (public, no key)."""
+    """Leaderboards + props from match scorers and group standings."""
     global STATS, PROPS
-    if os.path.exists(STATS_CACHE) and time.time() - os.path.getmtime(STATS_CACHE) < STATS_TTL:
-        cached = json.load(open(STATS_CACHE))
-        STATS, PROPS = cached.get("stats", {}), cached.get("props", {})
+    data = load_wc()
+    games, groups, teams = data.get("games", []), data.get("groups", {}), data.get("teams", [])
+    if not games:
         return
-    try:
-        r = requests.get(STATS_URL, timeout=20)
-        r.raise_for_status()
-        data = r.json()
-        STATS, PROPS = build_stats(data), build_props(data)
-        if STATS:
-            json.dump({"stats": STATS, "props": PROPS}, open(STATS_CACHE, "w"))
-    except Exception as e:
-        print("stats fetch failed, keeping current:", e)
+    STATS = build_stats(games, groups, teams)
+    PROPS = build_props(games, groups, teams)
 
 
-refresh_stats = load_stats  # alias: fills the STATS/PROPS globals in place
+refresh_stats = load_stats
 
 
 @app.get("/api/user/<username>")
@@ -313,9 +333,26 @@ def leaderboard(n=10):
     return [{"user": u, "wagered": w, "bets": b} for u, w, b in rows]
 
 
+def _emit_feed():
+    socketio.emit("odds", ODDS)
+    socketio.emit("games", list_games(GAMES))
+    socketio.emit("player_stats", STATS)
+    socketio.emit("props", PROPS)
+
+
+def _refresh_loop():
+    """Re-fetch World Cup data on cache expiry and push to all clients."""
+    while True:
+        socketio.sleep(WC_TTL)
+        refresh_odds()
+        refresh_games()
+        load_stats()
+        _emit_feed()
+
+
 @socketio.on("connect")
 def on_connect():
-    refresh_odds()  # cheap: only hits the API if cache is >24h old
+    refresh_odds()
     refresh_games()
     refresh_stats()
     emit("odds", ODDS)
@@ -359,6 +396,7 @@ def ensure_schema():
 if __name__ == "__main__":
     with app.app_context():
         ensure_schema()
+    socketio.start_background_task(_refresh_loop)
     # ponytail: no blocking API fetches here  they'd delay the port bind past
     # Railway's healthcheck (502). on_connect seeds odds/games/stats lazily instead.
     port = int(os.environ.get("PORT", 5000))

@@ -15,7 +15,7 @@ export function PropsPanel({ props, balance, onBet }) {
   const rows = (active && props[active]) || [];
 
   if (!markets.length) {
-    return <EmptyState message="Props appear once the stats feed is fetched." />;
+    return <EmptyState message="Props appear once match data is fetched." />;
   }
 
   return (

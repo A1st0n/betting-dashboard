@@ -193,6 +193,13 @@ button {
   border-radius: 8px;
 }
 
+.game-meta {
+  grid-column: 1 / -1;
+  font-size: 0.75rem;
+  color: #64748b;
+  text-align: center;
+}
+
 .game-status {
   text-transform: uppercase;
   font-size: 0.68rem;

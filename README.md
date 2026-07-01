@@ -4,19 +4,20 @@ Flask + Socket.IO + SQLite + React. Users sign up, top up a **mock wallet**, and
 place mock bets on teams or player props. Each user sees **their own** spend and
 history; a global **bettor leaderboard** and live scores update over a websocket.
 
-Odds/scores come from [the-odds-api](https://the-odds-api.com/#get-access);
-player stats + props are derived from theanalyst.com's public Opta feed. Both are
-cached to disk and fetched at most **once per 24h** (free-tier friendly). No key?
-The app falls back to bundled demo data so it still runs.
+Odds and live scores come from the [World Cup 2026 API](https://github.com/rezarahiminia/worldcup2026)
+(worldcup26.ir); player stats and props are derived from match scorers and group standings.
+Data is cached to disk and refreshed every **2 minutes** by default (`WC_CACHE_TTL`).
+No token? Public read endpoints work without auth.
 
 ## Features
 
 - **Auth**: login page with a separate sign-up modal; salted pbkdf2 hashing.
 - **Mock wallet**: deposit funds; bets are blocked unless you have the balance.
 - **Per-user history**: spend/history is scoped to the logged-in user (socket rooms).
-- **Games**: live, upcoming, and games finished in the last 3 days (the-odds-api `/scores`).
-- **Player stats**: Opta leaderboards (goals, xG, assists, tackles, save %…).
-- **Player props**: anytime goalscorer/assist odds derived from those rates (Poisson).
+- **Games**: live, upcoming, and finals from the last 3 days ([worldcup26.ir](https://worldcup26.ir/get/games)).
+- **Odds**: decimal lines derived from group-stage points (shorter odds for higher-ranked teams).
+- **Player stats**: goal scorers plus team goals/points from group standings.
+- **Player props**: anytime goalscorer odds from scorer rates (Poisson).
 - **Bettor leaderboard**: ranks users by mock money wagered; click a user for a detail modal.
 
 ## Stack
@@ -44,11 +45,13 @@ pip install -r requirements.txt
 npm --prefix frontend install
 ```
 
-Optional: put API keys in `.env` (gitignored, auto-loaded):
+Optional: put settings in `.env` (gitignored, auto-loaded):
 
 ```
-ODDS_API_KEY=your-the-odds-api-key
 SECRET_KEY=any-long-random-string
+WC_API_URL=https://worldcup26.ir
+WC_API_TOKEN=your-jwt-if-required
+WC_CACHE_TTL=120
 ```
 
 ## Start
@@ -83,7 +86,7 @@ npm --prefix frontend run dev  # terminal 2: http://localhost:5173 (proxies /api
 `frontend/dist` is committed so Railway's Python build serves it without Node.
 
 1. Push to GitHub, then Railway → **Deploy from GitHub repo** (auto-detects Python + `Procfile`).
-2. Set variables: `SECRET_KEY`, `ODDS_API_KEY` (`.env` isn't pushed).
+2. Set variables: `SECRET_KEY` (`.env` isn't pushed).
 3. **Settings → Networking → Generate Domain**.
 
 SQLite is ephemeral on Railway (resets each redeploy). For persistence, add a
@@ -99,6 +102,6 @@ python props.py    # asserts prop-odds ordering + leaderboard reductions
 ## Notes
 
 - `SECRET_KEY` falls back to a dev value; set it in the environment for real deploys.
-- API responses cache to `*_cache.json` (gitignored); delete them to force a refetch.
+- API responses cache to `wc_cache.json` (gitignored); delete it to force a refetch.
 - Prop odds are trusted from the client for **mock** money only; recompute
   server-side before settling anything real.
