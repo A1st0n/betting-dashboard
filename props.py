@@ -21,7 +21,8 @@ PROP_MARKETS = [
 
 def _name(r):
     return {"player": r.get("player"),
-            "team": r.get("contestantName") or r.get("contestantCode")}
+            "team": r.get("contestantName") or r.get("contestantCode"),
+            "team_id": r.get("team_id")}  # Opta id -> crest image on the client
 
 
 def _top(rows, stat, n=10):

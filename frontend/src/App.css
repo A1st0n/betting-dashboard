@@ -705,3 +705,40 @@ input:focus, select:focus, textarea:focus, button:focus-visible {
   box-shadow: 0 0 0 1px #6366f1, 0 0 14px rgba(99, 102, 241, 0.55);
   outline: none;
 }
+
+.bethist { display: flex; flex-direction: column; gap: 4px; }
+.bethist-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid #e5e7eb;
+}
+.bethist-pick { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bethist-stake { font-size: 0.8rem; color: #64748b; font-variant-numeric: tabular-nums; }
+.bethist-status {
+  min-width: 62px;
+  text-align: center;
+  padding: 2px 8px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: #475569;
+  background: #eef2f7;
+}
+.bethist-status.is-won { color: #047857; background: #dcfce7; }
+.bethist-status.is-lost { color: #b91c1c; background: #fee2e2; }
+.bethist-status.is-void { color: #92400e; background: #fef3c7; }
+
+.stats-player { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.crest { flex: 0 0 auto; object-fit: contain; vertical-align: middle; }
+
+.account-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 4px; }
+
+.spend-chart { display: flex; flex-direction: column; gap: 8px; padding: 4px 0; }
+.spend-row { display: grid; grid-template-columns: 110px 1fr auto; align-items: center; gap: 10px; }
+.spend-team { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.88rem; color: #334155; }
+.spend-track { height: 22px; background: #f1f5f9; }
+.spend-bar { display: block; height: 100%; background: #2563eb; min-width: 2px; transition: width 0.3s ease; }
+.spend-val { font-variant-numeric: tabular-nums; font-weight: 700; color: #334155; font-size: 0.85rem; }

@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { CircleDollarSign, Trophy } from "lucide-react";
+import Crest from "./Crest.jsx";
 
 const money = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -76,7 +77,10 @@ function PropRow({ row, label, balance, onBet }) {
         stake * row.odds
       )}.`}
     >
-      <span className="stats-player">{row.player}</span>
+      <span className="stats-player">
+        <Crest teamId={row.team_id} team={row.team} />
+        {row.player}
+      </span>
       <span className="stats-team">{row.team}</span>
       <span className="prop-prob">{Math.round(row.prob * 100)}%</span>
       <strong className="stats-value">{row.odds}</strong>

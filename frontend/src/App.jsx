@@ -15,20 +15,13 @@ import {
   WifiOff,
   X,
 } from "lucide-react";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 import { io } from "socket.io-client";
 import { PropsPanel, LeaderboardPanel } from "./extras.jsx";
 import SoftAurora from "./SoftAurora.jsx";
 import TrueFocus from "./TrueFocus.jsx";
 import Dock from "./Dock.jsx";
+import { flag } from "./flags.js";
+import Crest from "./Crest.jsx";
 
 const socket = io(); // same origin; dev proxy forwards to Flask
 
@@ -78,6 +71,7 @@ export default function App() {
     const handleStats = (data) => setStats(data || {});
     const handleProps = (data) => setProps(data || {});
     const handleBoard = (data) => setBoard(data || []);
+    const handleWallet = (data) => setBalance(Number(data?.balance || 0));
     const handleAggregates = (data) =>
       setAgg(data || { total: 0, by_team: [] });
     const handleConnect = () => setConnected(true);
@@ -88,6 +82,7 @@ export default function App() {
     socket.on("player_stats", handleStats);
     socket.on("props", handleProps);
     socket.on("leaderboard", handleBoard);
+    socket.on("wallet", handleWallet);
     socket.on("aggregates", handleAggregates);
     socket.on("connect", handleConnect);
     socket.on("disconnect", handleDisconnect);
@@ -99,6 +94,7 @@ export default function App() {
       socket.off("player_stats", handleStats);
       socket.off("props", handleProps);
       socket.off("leaderboard", handleBoard);
+      socket.off("wallet", handleWallet);
       socket.off("aggregates", handleAggregates);
       socket.off("connect", handleConnect);
       socket.off("disconnect", handleDisconnect);
@@ -173,7 +169,18 @@ function Welcome({ onDone }) {
 function Dashboard({ agg, balance, board, connected, games, odds, props, stats, user, onBalance, onLogout }) {
   const [showDeposit, setShowDeposit] = useState(false);
   const [detail, setDetail] = useState(null);
+  const [account, setAccount] = useState(null);
   const [view, setView] = useState("Games");
+
+  async function openAccount() {
+    try {
+      const r = await fetch("/api/mybets");
+      const data = await r.json();
+      setAccount(r.ok ? data : { balance: 0, bets: [], error: data.error });
+    } catch {
+      setAccount({ balance: 0, bets: [], error: "could not load account" });
+    }
+  }
 
   async function placeBet(payload) {
     const data = await api("/bet", payload);
@@ -254,10 +261,15 @@ function Dashboard({ agg, balance, board, connected, games, odds, props, stats, 
             {money.format(balance)}
             <Plus size={14} aria-hidden="true" />
           </button>
-          <span className="user-pill">
+          <button
+            className="user-pill"
+            onClick={openAccount}
+            title="View your account"
+            type="button"
+          >
             <User size={16} aria-hidden="true" />
             {user}
-          </span>
+          </button>
           <button
             className="icon-button"
             onClick={handleLogout}
@@ -424,6 +436,67 @@ function Dashboard({ agg, balance, board, connected, games, odds, props, stats, 
         </Modal>
       )}
 
+      {account && (
+        <Modal onClose={() => setAccount(null)} title={`${user} · account`}>
+          <div className="user-detail">
+            <div className="user-detail-stats">
+              <span>
+                <p>Balance</p>
+                <strong>{money.format(Number(account.balance || 0))}</strong>
+              </span>
+              <span>
+                <p>Record (W-L)</p>
+                <strong>
+                  {(account.bets || []).filter((b) => b.status === "won").length}
+                  {"-"}
+                  {(account.bets || []).filter((b) => b.status === "lost").length}
+                </strong>
+              </span>
+            </div>
+
+            {!account.bets || account.bets.length === 0 ? (
+              <EmptyState message="No bets yet. Place one to start your history." />
+            ) : (
+              <div className="bethist">
+                {account.bets.map((b, i) => (
+                  <div className="bethist-row" key={i}>
+                    <span className="bethist-pick">{b.team}</span>
+                    <span className="bethist-stake">
+                      {money.format(b.amount)} @ {b.odds}
+                    </span>
+                    <span className={`bethist-status is-${b.status}`}>
+                      {b.status === "won"
+                        ? `+${money.format(b.payout)}`
+                        : b.status === "void"
+                        ? "refund"
+                        : b.status}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="account-actions">
+              <button
+                className="primary-button"
+                onClick={() => {
+                  setAccount(null);
+                  setShowDeposit(true);
+                }}
+                type="button"
+              >
+                <Wallet size={16} aria-hidden="true" />
+                Add funds
+              </button>
+              <button className="secondary-button" onClick={handleLogout} type="button">
+                <LogOut size={16} aria-hidden="true" />
+                Log out
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
       <Dock
         active={view}
         items={[
@@ -560,7 +633,10 @@ function StatsPanel({ stats }) {
         {rows.map((r, i) => (
           <li key={`${r.player}-${i}`} title={`#${i + 1} ${r.player} (${r.team}) — ${active}: ${r.value}`}>
             <span className="stats-rank">{i + 1}</span>
-            <span className="stats-player">{r.player}</span>
+            <span className="stats-player">
+              <Crest teamId={r.team_id} team={r.team} />
+              {r.player}
+            </span>
             <span className="stats-team">{r.team}</span>
             <strong className="stats-value">
               {Number.isInteger(Number(r.value))
@@ -589,13 +665,13 @@ function GamesPanel({ games }) {
           )}`}
         >
           <span className={`game-status is-${g.status}`}>{g.status}</span>
-          <strong className="game-team">{g.home}</strong>
+          <strong className="game-team">{flag(g.home)} {g.home}</strong>
           <span className="game-center">
             {g.status === "upcoming"
               ? kickoff.format(new Date(g.commence_time))
               : `${g.home_score ?? "–"} : ${g.away_score ?? "–"}`}
           </span>
-          <strong className="game-team game-away">{g.away}</strong>
+          <strong className="game-team game-away">{g.away} {flag(g.away)}</strong>
         </div>
       ))}
     </div>
@@ -712,36 +788,20 @@ function SpendChart({ rows }) {
   }
 
   const chartRows = rows.slice(0, 8);
+  const max = Math.max(...chartRows.map((r) => r.spent), 1);
 
+  // ponytail: plain CSS bars  drops the ~570KB recharts dep, same horizontal bar look
   return (
-    <div className="chart-wrap">
-      <ResponsiveContainer height={260} width="100%">
-        <BarChart
-          data={chartRows}
-          layout="vertical"
-          margin={{ bottom: 8, left: 8, right: 16, top: 8 }}
-        >
-          <CartesianGrid horizontal={false} stroke="#e5e7eb" />
-          <XAxis
-            axisLine={false}
-            tickFormatter={(value) => money.format(Number(value))}
-            tickLine={false}
-            type="number"
-          />
-          <YAxis
-            axisLine={false}
-            dataKey="team"
-            tickLine={false}
-            type="category"
-            width={110}
-          />
-          <Tooltip
-            cursor={{ fill: "#f1f5f9" }}
-            formatter={(value) => [money.format(Number(value)), "Spent"]}
-          />
-          <Bar dataKey="spent" fill="#2563eb" radius={[0, 6, 6, 0]} />
-        </BarChart>
-      </ResponsiveContainer>
+    <div className="spend-chart">
+      {chartRows.map((r) => (
+        <div className="spend-row" key={r.team} title={`${r.team}: ${money.format(r.spent)}`}>
+          <span className="spend-team">{r.team}</span>
+          <span className="spend-track">
+            <span className="spend-bar" style={{ width: `${(r.spent / max) * 100}%` }} />
+          </span>
+          <span className="spend-val">{money.format(r.spent)}</span>
+        </div>
+      ))}
     </div>
   );
 }

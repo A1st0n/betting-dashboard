@@ -46,6 +46,8 @@ class Bet(db.Model):
     amount = db.Column(db.Float)
     odds = db.Column(db.Float)
     ts = db.Column(db.Float)
+    status = db.Column(db.String, nullable=False, default="pending")  # pending|won|lost|void
+    payout = db.Column(db.Float, nullable=False, default=0.0)
 
 
 def aggregates(user_id):
@@ -313,11 +315,58 @@ def leaderboard(n=10):
     return [{"user": u, "wagered": w, "bets": b} for u, w, b in rows]
 
 
+def settle_bets():
+    """Resolve pending team bets against finished games; pay out wins. Returns affected user ids.
+    ponytail: props can't settle from /scores (no player events), so they stay pending."""
+    finals = {}  # team -> (own_score, opp_score, kickoff_ts) for its most relevant final
+    for g in list_games(GAMES):
+        if g["status"] != "final" or g["home_score"] is None or g["away_score"] is None:
+            continue
+        hs, as_ = int(g["home_score"]), int(g["away_score"])
+        kt = _ts(g["commence_time"])
+        finals.setdefault(g["home"], []).append((hs, as_, kt))
+        finals.setdefault(g["away"], []).append((as_, hs, kt))
+
+    affected = set()
+    for bet in Bet.query.filter_by(status="pending").all():
+        games = sorted((x for x in finals.get(bet.team, []) if x[2] >= (bet.ts or 0)),
+                       key=lambda x: x[2])
+        if not games:
+            continue  # no finished game for this pick yet (or it's a prop) -> stays pending
+        mine, opp, _ = games[0]
+        user = db.session.get(User, bet.user_id)
+        if mine > opp:
+            bet.status, bet.payout = "won", round(bet.amount * bet.odds, 2)
+            user.balance += bet.payout
+        elif mine < opp:
+            bet.status, bet.payout = "lost", 0.0
+        else:
+            bet.status, bet.payout = "void", bet.amount  # draw -> stake refunded
+            user.balance += bet.amount
+        affected.add(user.id)
+    if affected:
+        db.session.commit()
+    return affected
+
+
+@app.get("/api/mybets")
+def my_bets():
+    if "user" not in session:
+        return jsonify(error="login required"), 401
+    user = User.query.filter_by(username=session["user"]).first()
+    rows = Bet.query.filter_by(user_id=user.id).order_by(Bet.ts.desc()).all()
+    return jsonify(
+        balance=user.balance,
+        bets=[{"team": b.team, "match": b.match, "amount": b.amount, "odds": b.odds,
+               "status": b.status, "payout": b.payout, "ts": b.ts} for b in rows])
+
+
 @socketio.on("connect")
 def on_connect():
     refresh_odds()  # cheap: only hits the API if cache is >24h old
     refresh_games()
     refresh_stats()
+    affected = settle_bets()  # resolve finished games, pay out wins
     emit("odds", ODDS)
     emit("games", list_games(GAMES))
     emit("player_stats", STATS)
@@ -328,6 +377,8 @@ def on_connect():
         join_room(u)  # bets push back to this room only
         user = User.query.filter_by(username=u).first()
         emit("aggregates", aggregates(user.id))
+        if user.id in affected:  # a bet settled while away: refresh their wallet
+            emit("wallet", {"balance": user.balance})
     else:
         emit("aggregates", {"total": 0, "by_team": []})
 
@@ -336,6 +387,8 @@ def on_connect():
 @app.get("/")
 @app.get("/<path:path>")
 def spa(path=""):
+    if path.startswith("api/"):  # unknown API route: 404 JSON, never the SPA page
+        return jsonify(error="not found"), 404
     full = os.path.join(DIST, path)
     if path and os.path.isfile(full):
         response = send_from_directory(DIST, path)
@@ -348,12 +401,17 @@ def spa(path=""):
 
 
 def ensure_schema():
-    """Add the wallet column to a pre-existing DB. ponytail: one ALTER beats Alembic."""
+    """Add new columns to a pre-existing DB. ponytail: a few ALTERs beat Alembic."""
     db.create_all()
-    cols = [r[1] for r in db.session.execute(db.text("PRAGMA table_info(user)"))]
-    if "balance" not in cols:
+    ucols = [r[1] for r in db.session.execute(db.text("PRAGMA table_info(user)"))]
+    if "balance" not in ucols:
         db.session.execute(db.text("ALTER TABLE user ADD COLUMN balance FLOAT NOT NULL DEFAULT 0"))
-        db.session.commit()
+    bcols = [r[1] for r in db.session.execute(db.text("PRAGMA table_info(bet)"))]
+    if "status" not in bcols:
+        db.session.execute(db.text("ALTER TABLE bet ADD COLUMN status VARCHAR NOT NULL DEFAULT 'pending'"))
+    if "payout" not in bcols:
+        db.session.execute(db.text("ALTER TABLE bet ADD COLUMN payout FLOAT NOT NULL DEFAULT 0"))
+    db.session.commit()
 
 
 if __name__ == "__main__":
