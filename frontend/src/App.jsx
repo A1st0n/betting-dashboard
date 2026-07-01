@@ -26,6 +26,9 @@ import {
 } from "recharts";
 import { io } from "socket.io-client";
 import { PropsPanel, LeaderboardPanel } from "./extras.jsx";
+import SoftAurora from "./SoftAurora.jsx";
+import TrueFocus from "./TrueFocus.jsx";
+import Dock from "./Dock.jsx";
 
 const socket = io(); // same origin; dev proxy forwards to Flask
 
@@ -56,6 +59,7 @@ export default function App() {
   const [board, setBoard] = useState([]);
   const [agg, setAgg] = useState({ total: 0, by_team: [] });
   const [connected, setConnected] = useState(socket.connected);
+  const [showWelcome, setShowWelcome] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -108,37 +112,68 @@ export default function App() {
     socket.connect();
   }, [user]);
 
-  if (user === undefined) return <LoadingScreen />;
-  if (!user)
-    return (
+  let content;
+  if (user === undefined) {
+    content = <LoadingScreen />;
+  } else if (!user) {
+    content = (
       <Auth
         onAuth={(name, bal) => {
           setUser(name);
           setBalance(Number(bal || 0));
+          setShowWelcome(true);
         }}
       />
     );
+  } else if (showWelcome) {
+    content = <Welcome onDone={() => setShowWelcome(false)} />;
+  } else {
+    content = (
+      <Dashboard
+        agg={agg}
+        balance={balance}
+        connected={connected}
+        board={board}
+        games={games}
+        odds={odds}
+        props={props}
+        stats={stats}
+        user={user}
+        onBalance={setBalance}
+        onLogout={() => setUser(null)}
+      />
+    );
+  }
 
   return (
-    <Dashboard
-      agg={agg}
-      balance={balance}
-      connected={connected}
-      board={board}
-      games={games}
-      odds={odds}
-      props={props}
-      stats={stats}
-      user={user}
-      onBalance={setBalance}
-      onLogout={() => setUser(null)}
-    />
+    <>
+      <SoftAurora />
+      {content}
+    </>
+  );
+}
+
+function Welcome({ onDone }) {
+  return (
+    <main className="auth-shell">
+      <section className="auth-panel welcome-panel">
+        <TrueFocus
+          sentence="Welcome to Bets.app: An interactive accelerator to hone your intuition"
+          borderColor="#6366f1"
+          interval={900}
+        />
+        <button className="primary-button" onClick={onDone} type="button">
+          Enter
+        </button>
+      </section>
+    </main>
   );
 }
 
 function Dashboard({ agg, balance, board, connected, games, odds, props, stats, user, onBalance, onLogout }) {
   const [showDeposit, setShowDeposit] = useState(false);
   const [detail, setDetail] = useState(null);
+  const [view, setView] = useState("Games");
 
   async function placeBet(payload) {
     const data = await api("/bet", payload);
@@ -258,84 +293,96 @@ function Dashboard({ agg, balance, board, connected, games, odds, props, stats, 
       </section>
 
       <main className="dashboard-grid">
-        <section className="panel wide-panel">
-          <PanelHeader
-            eyebrow="Live, upcoming & finished in the last 3 days"
-            icon={<Trophy size={18} aria-hidden="true" />}
-            title="Games"
-          />
-          <GamesPanel games={games} />
-        </section>
+        {view === "Games" && (
+          <section className="panel wide-panel">
+            <PanelHeader
+              eyebrow="Live, upcoming & finished in the last 3 days"
+              icon={<Trophy size={18} aria-hidden="true" />}
+              title="Games"
+            />
+            <GamesPanel games={games} />
+          </section>
+        )}
 
-        <section className="panel bet-panel">
-          <PanelHeader
-            eyebrow={`${oddsRows.length} markets`}
-            icon={<CircleDollarSign size={18} aria-hidden="true" />}
-            title="Place a mock bet"
-          />
-          {balance <= 0 && (
-            <EmptyState message="Add funds to your wallet before placing a bet." />
-          )}
-          {oddsRows.length === 0 ? (
-            <EmptyState message="No odds loaded yet. Check the API key or odds cache." />
-          ) : (
-            <div className="bet-list">
-              {oddsRows.map((row) => (
-                <BetRow
-                  key={row.team}
-                  row={row}
-                  balance={balance}
-                  onBalance={onBalance}
-                />
-              ))}
-            </div>
-          )}
-        </section>
+        {view === "Bet" && (
+          <>
+            <section className="panel bet-panel">
+              <PanelHeader
+                eyebrow={`${oddsRows.length} markets`}
+                icon={<CircleDollarSign size={18} aria-hidden="true" />}
+                title="Place a mock bet"
+              />
+              {balance <= 0 && (
+                <EmptyState message="Add funds to your wallet before placing a bet." />
+              )}
+              {oddsRows.length === 0 ? (
+                <EmptyState message="No odds loaded yet. Check the API key or odds cache." />
+              ) : (
+                <div className="bet-list">
+                  {oddsRows.map((row) => (
+                    <BetRow
+                      key={row.team}
+                      row={row}
+                      balance={balance}
+                      onBalance={onBalance}
+                    />
+                  ))}
+                </div>
+              )}
+            </section>
 
-        <section className="panel">
-          <PanelHeader
-            eyebrow="Normalized from decimal odds"
-            icon={<BarChart3 size={18} aria-hidden="true" />}
-            title="Implied win chance"
-          />
-          <OddsList rows={oddsRows} />
-        </section>
+            <section className="panel">
+              <PanelHeader
+                eyebrow="Normalized from decimal odds"
+                icon={<BarChart3 size={18} aria-hidden="true" />}
+                title="Implied win chance"
+              />
+              <OddsList rows={oddsRows} />
+            </section>
 
-        <section className="panel wide-panel">
-          <PanelHeader
-            eyebrow="Updates after every mock bet"
-            icon={<BadgeDollarSign size={18} aria-hidden="true" />}
-            title="Spend by team"
-          />
-          <SpendChart rows={spendRows} />
-        </section>
+            <section className="panel wide-panel">
+              <PanelHeader
+                eyebrow="Updates after every mock bet"
+                icon={<BadgeDollarSign size={18} aria-hidden="true" />}
+                title="Spend by team"
+              />
+              <SpendChart rows={spendRows} />
+            </section>
+          </>
+        )}
 
-        <section className="panel wide-panel">
-          <PanelHeader
-            eyebrow="Player leaderboards · Opta via theanalyst.com"
-            icon={<BarChart3 size={18} aria-hidden="true" />}
-            title="Player stats"
-          />
-          <StatsPanel stats={stats} />
-        </section>
+        {view === "Stats" && (
+          <section className="panel wide-panel">
+            <PanelHeader
+              eyebrow="Player leaderboards · Opta via theanalyst.com"
+              icon={<BarChart3 size={18} aria-hidden="true" />}
+              title="Player stats"
+            />
+            <StatsPanel stats={stats} />
+          </section>
+        )}
 
-        <section className="panel bet-panel">
-          <PanelHeader
-            eyebrow="Derived from Opta rates · $10 mock stake"
-            icon={<CircleDollarSign size={18} aria-hidden="true" />}
-            title="Player props"
-          />
-          <PropsPanel props={props} balance={balance} onBet={placeBet} />
-        </section>
+        {view === "Props" && (
+          <section className="panel bet-panel">
+            <PanelHeader
+              eyebrow="Derived from Opta rates · $10 mock stake"
+              icon={<CircleDollarSign size={18} aria-hidden="true" />}
+              title="Player props"
+            />
+            <PropsPanel props={props} balance={balance} onBet={placeBet} />
+          </section>
+        )}
 
-        <section className="panel">
-          <PanelHeader
-            eyebrow="Most mock money wagered"
-            icon={<Trophy size={18} aria-hidden="true" />}
-            title="Bettor leaderboard"
-          />
-          <LeaderboardPanel rows={board} me={user} onSelect={openUser} />
-        </section>
+        {view === "Leaderboard" && (
+          <section className="panel">
+            <PanelHeader
+              eyebrow="Most mock money wagered"
+              icon={<Trophy size={18} aria-hidden="true" />}
+              title="Bettor leaderboard"
+            />
+            <LeaderboardPanel rows={board} me={user} onSelect={openUser} />
+          </section>
+        )}
       </main>
 
       {showDeposit && (
@@ -376,6 +423,23 @@ function Dashboard({ agg, balance, board, connected, games, odds, props, stats, 
           </div>
         </Modal>
       )}
+
+      <Dock
+        active={view}
+        items={[
+          { label: "Games", icon: <Trophy size={20} /> },
+          { label: "Bet", icon: <CircleDollarSign size={20} /> },
+          { label: "Stats", icon: <BarChart3 size={20} /> },
+          { label: "Props", icon: <BadgeDollarSign size={20} /> },
+          { label: "Leaderboard", icon: <Trophy size={20} /> },
+        ].map((it) => ({
+          ...it,
+          onClick: () => {
+            setView(it.label);
+            window.scrollTo({ top: 0 });
+          },
+        }))}
+      />
     </div>
   );
 }
@@ -494,7 +558,7 @@ function StatsPanel({ stats }) {
       </select>
       <ol className="stats-list">
         {rows.map((r, i) => (
-          <li key={`${r.player}-${i}`}>
+          <li key={`${r.player}-${i}`} title={`#${i + 1} ${r.player} (${r.team}) — ${active}: ${r.value}`}>
             <span className="stats-rank">{i + 1}</span>
             <span className="stats-player">{r.player}</span>
             <span className="stats-team">{r.team}</span>
@@ -517,7 +581,13 @@ function GamesPanel({ games }) {
   return (
     <div className="games-list">
       {games.map((g) => (
-        <div className="game-row" key={g.id}>
+        <div
+          className="game-row"
+          key={g.id}
+          title={`${g.home} vs ${g.away} — ${g.status} — kickoff ${kickoff.format(
+            new Date(g.commence_time)
+          )}`}
+        >
           <span className={`game-status is-${g.status}`}>{g.status}</span>
           <strong className="game-team">{g.home}</strong>
           <span className="game-center">
@@ -534,7 +604,7 @@ function GamesPanel({ games }) {
 
 function StatCard({ icon, label, value }) {
   return (
-    <article className="stat-card">
+    <article className="stat-card" title={`${label}: ${value}`}>
       <span className="stat-icon">{icon}</span>
       <div>
         <p>{label}</p>

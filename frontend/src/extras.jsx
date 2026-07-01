@@ -68,12 +68,25 @@ function PropRow({ row, label, balance, onBet }) {
   }
 
   return (
-    <div className="prop-row">
+    <div
+      className="prop-row"
+      title={`${row.player} (${row.team}) — ${label} — ${Math.round(
+        row.prob * 100
+      )}% implied, decimal odds ${row.odds}. Bet ${money.format(stake)} to win ${money.format(
+        stake * row.odds
+      )}.`}
+    >
       <span className="stats-player">{row.player}</span>
       <span className="stats-team">{row.team}</span>
       <span className="prop-prob">{Math.round(row.prob * 100)}%</span>
       <strong className="stats-value">{row.odds}</strong>
-      <button className="primary-button" disabled={!canBet} onClick={bet} type="button">
+      <button
+        className="primary-button"
+        disabled={!canBet}
+        onClick={bet}
+        title={canBet ? `Stake ${money.format(stake)} on ${row.player}` : "Add funds first"}
+        type="button"
+      >
         <CircleDollarSign size={14} aria-hidden="true" />
         {money.format(stake)}
       </button>
@@ -91,7 +104,12 @@ export function LeaderboardPanel({ rows, me, onSelect }) {
     <ol className="stats-list">
       {rows.map((r, i) => (
         <li className={r.user === me ? "is-me" : undefined} key={r.user}>
-          <button className="board-row" onClick={() => onSelect(r.user)} type="button">
+          <button
+            className="board-row"
+            onClick={() => onSelect(r.user)}
+            title={`#${i + 1} ${r.user} — ${money.format(r.wagered)} across ${r.bets} bets. Click for details.`}
+            type="button"
+          >
             <span className="stats-rank">
               {i === 0 ? <Trophy size={14} aria-hidden="true" /> : i + 1}
             </span>

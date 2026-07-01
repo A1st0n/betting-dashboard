@@ -1,8 +1,7 @@
 :root {
   color: #18212f;
-  background: #f4f7fb;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
-    "Segoe UI", sans-serif;
+  background: transparent;
+  font-family: "Courier New", Courier, monospace;
   font-synthesis: none;
   line-height: 1.5;
   text-rendering: optimizeLegibility;
@@ -15,8 +14,7 @@
 body {
   min-height: 100vh;
   margin: 0;
-  background:
-    linear-gradient(180deg, #f8fafc 0%, #eef4f8 44%, #f4f7fb 100%);
+  background: transparent;  /* let SoftAurora show through */
 }
 
 button,
@@ -31,7 +29,7 @@ button {
 .app-shell {
   width: min(1180px, calc(100% - 32px));
   margin: 0 auto;
-  padding: 28px 0 40px;
+  padding: 28px 0 110px;  /* bottom room for the fixed Dock */
 }
 
 .topbar,
@@ -39,7 +37,7 @@ button {
 .panel,
 .auth-panel {
   border: 1px solid #d9e2ec;
-  background: rgba(255, 255, 255, 0.94);
+  background: #ffffff;  /* opaque: no per-scroll re-blend over the animated aurora */
   box-shadow: 0 18px 45px rgba(24, 33, 47, 0.08);
 }
 
@@ -671,4 +669,39 @@ button {
   .auth-actions {
     grid-template-columns: 1fr;
   }
+}
+
+.welcome-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 28px;
+  width: min(560px, 100%);
+  text-align: center;
+  font-size: 1.6rem;
+}
+.welcome-panel .true-focus {
+  color: #1e293b;
+}
+.welcome-panel .primary-button {
+  padding: 10px 28px;
+}
+
+/* --- sharp corners everywhere (aurora blobs stay round) --- */
+* { border-radius: 0 !important; }
+.soft-aurora span { border-radius: 50% !important; }
+
+/* --- border glow on every outlined / interactive element --- */
+.panel, .stat-card, .topbar, .auth-panel, .game-row, .prop-row,
+.stats-list li, .metric-row, input, select, textarea, button,
+.status-pill, .user-pill, .wallet-pill, .modal-card {
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.panel:hover, .stat-card:hover, .game-row:hover, .prop-row:hover,
+.stats-list li:hover, .metric-row:hover, .wallet-pill:hover,
+button:hover, .modal-card:hover,
+input:focus, select:focus, textarea:focus, button:focus-visible {
+  border-color: #6366f1 !important;
+  box-shadow: 0 0 0 1px #6366f1, 0 0 14px rgba(99, 102, 241, 0.55);
+  outline: none;
 }
