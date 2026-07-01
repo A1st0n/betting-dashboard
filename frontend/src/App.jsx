@@ -25,6 +25,7 @@ import {
   YAxis,
 } from "recharts";
 import { io } from "socket.io-client";
+import { PropsPanel, LeaderboardPanel } from "./extras.jsx";
 
 const socket = io(); // same origin; dev proxy forwards to Flask
 
@@ -49,6 +50,10 @@ export default function App() {
   const [user, setUser] = useState(undefined);
   const [balance, setBalance] = useState(0);
   const [odds, setOdds] = useState({});
+  const [games, setGames] = useState([]);
+  const [stats, setStats] = useState({});
+  const [props, setProps] = useState({});
+  const [board, setBoard] = useState([]);
   const [agg, setAgg] = useState({ total: 0, by_team: [] });
   const [connected, setConnected] = useState(socket.connected);
 
@@ -65,12 +70,20 @@ export default function App() {
       .catch(() => active && setUser(null));
 
     const handleOdds = (data) => setOdds(data || {});
+    const handleGames = (data) => setGames(data || []);
+    const handleStats = (data) => setStats(data || {});
+    const handleProps = (data) => setProps(data || {});
+    const handleBoard = (data) => setBoard(data || []);
     const handleAggregates = (data) =>
       setAgg(data || { total: 0, by_team: [] });
     const handleConnect = () => setConnected(true);
     const handleDisconnect = () => setConnected(false);
 
     socket.on("odds", handleOdds);
+    socket.on("games", handleGames);
+    socket.on("player_stats", handleStats);
+    socket.on("props", handleProps);
+    socket.on("leaderboard", handleBoard);
     socket.on("aggregates", handleAggregates);
     socket.on("connect", handleConnect);
     socket.on("disconnect", handleDisconnect);
@@ -78,6 +91,10 @@ export default function App() {
     return () => {
       active = false;
       socket.off("odds", handleOdds);
+      socket.off("games", handleGames);
+      socket.off("player_stats", handleStats);
+      socket.off("props", handleProps);
+      socket.off("leaderboard", handleBoard);
       socket.off("aggregates", handleAggregates);
       socket.off("connect", handleConnect);
       socket.off("disconnect", handleDisconnect);
@@ -107,7 +124,11 @@ export default function App() {
       agg={agg}
       balance={balance}
       connected={connected}
+      board={board}
+      games={games}
       odds={odds}
+      props={props}
+      stats={stats}
       user={user}
       onBalance={setBalance}
       onLogout={() => setUser(null)}
@@ -115,8 +136,19 @@ export default function App() {
   );
 }
 
-function Dashboard({ agg, balance, connected, odds, user, onBalance, onLogout }) {
+function Dashboard({ agg, balance, board, connected, games, odds, props, stats, user, onBalance, onLogout }) {
   const [showDeposit, setShowDeposit] = useState(false);
+  const [detail, setDetail] = useState(null);
+
+  async function placeBet(payload) {
+    const data = await api("/bet", payload);
+    onBalance(Number(data.balance || 0));
+  }
+
+  async function openUser(name) {
+    const r = await fetch("/api/user/" + encodeURIComponent(name));
+    setDetail(await r.json());
+  }
   const oddsRows = useMemo(() => {
     const rows = Object.entries(odds)
       .map(([team, price]) => ({
@@ -226,6 +258,15 @@ function Dashboard({ agg, balance, connected, odds, user, onBalance, onLogout })
       </section>
 
       <main className="dashboard-grid">
+        <section className="panel wide-panel">
+          <PanelHeader
+            eyebrow="Live, upcoming & finished in the last 3 days"
+            icon={<Trophy size={18} aria-hidden="true" />}
+            title="Games"
+          />
+          <GamesPanel games={games} />
+        </section>
+
         <section className="panel bet-panel">
           <PanelHeader
             eyebrow={`${oddsRows.length} markets`}
@@ -268,6 +309,33 @@ function Dashboard({ agg, balance, connected, odds, user, onBalance, onLogout })
           />
           <SpendChart rows={spendRows} />
         </section>
+
+        <section className="panel wide-panel">
+          <PanelHeader
+            eyebrow="Player leaderboards · Opta via theanalyst.com"
+            icon={<BarChart3 size={18} aria-hidden="true" />}
+            title="Player stats"
+          />
+          <StatsPanel stats={stats} />
+        </section>
+
+        <section className="panel bet-panel">
+          <PanelHeader
+            eyebrow="Derived from Opta rates · $10 mock stake"
+            icon={<CircleDollarSign size={18} aria-hidden="true" />}
+            title="Player props"
+          />
+          <PropsPanel props={props} balance={balance} onBet={placeBet} />
+        </section>
+
+        <section className="panel">
+          <PanelHeader
+            eyebrow="Most mock money wagered"
+            icon={<Trophy size={18} aria-hidden="true" />}
+            title="Bettor leaderboard"
+          />
+          <LeaderboardPanel rows={board} me={user} onSelect={openUser} />
+        </section>
       </main>
 
       {showDeposit && (
@@ -275,6 +343,38 @@ function Dashboard({ agg, balance, connected, odds, user, onBalance, onLogout })
           onClose={() => setShowDeposit(false)}
           onBalance={onBalance}
         />
+      )}
+
+      {detail && (
+        <Modal onClose={() => setDetail(null)} title={detail.user}>
+          <div className="user-detail">
+            <div className="user-detail-stats">
+              <span>
+                <p>Wagered</p>
+                <strong>{money.format(Number(detail.wagered || 0))}</strong>
+              </span>
+              <span>
+                <p>Bets</p>
+                <strong>{detail.bets}</strong>
+              </span>
+            </div>
+            {(detail.by_team || []).length === 0 ? (
+              <EmptyState message="No bets placed yet." />
+            ) : (
+              <div className="odds-list">
+                {detail.by_team.map((t) => (
+                  <div className="metric-row" key={t.team}>
+                    <div className="metric-label">
+                      <span>{t.team}</span>
+                      <strong>{money.format(Number(t.spent || 0))}</strong>
+                    </div>
+                    <span className="row-message">{t.n} bets</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </Modal>
       )}
     </div>
   );
@@ -358,6 +458,76 @@ function Modal({ title, onClose, children }) {
         </div>
         {children}
       </div>
+    </div>
+  );
+}
+
+const kickoff = new Intl.DateTimeFormat("en-US", {
+  weekday: "short",
+  hour: "numeric",
+  minute: "2-digit",
+});
+
+function StatsPanel({ stats }) {
+  const boards = Object.keys(stats);
+  const [board, setBoard] = useState(boards[0]);
+  const active = board && stats[board] ? board : boards[0];
+  const rows = (active && stats[active]) || [];
+
+  if (!boards.length) {
+    return <EmptyState message="Player stats load once the feed is fetched." />;
+  }
+
+  return (
+    <div className="stats-wrap">
+      <select
+        aria-label="Stat leaderboard"
+        className="stats-select"
+        onChange={(event) => setBoard(event.target.value)}
+        value={active}
+      >
+        {boards.map((b) => (
+          <option key={b} value={b}>
+            {b}
+          </option>
+        ))}
+      </select>
+      <ol className="stats-list">
+        {rows.map((r, i) => (
+          <li key={`${r.player}-${i}`}>
+            <span className="stats-rank">{i + 1}</span>
+            <span className="stats-player">{r.player}</span>
+            <span className="stats-team">{r.team}</span>
+            <strong className="stats-value">
+              {Number.isInteger(Number(r.value))
+                ? r.value
+                : Number(r.value).toFixed(2)}
+            </strong>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+function GamesPanel({ games }) {
+  if (!games.length) {
+    return <EmptyState message="No live, upcoming, or recent games right now." />;
+  }
+  return (
+    <div className="games-list">
+      {games.map((g) => (
+        <div className="game-row" key={g.id}>
+          <span className={`game-status is-${g.status}`}>{g.status}</span>
+          <strong className="game-team">{g.home}</strong>
+          <span className="game-center">
+            {g.status === "upcoming"
+              ? kickoff.format(new Date(g.commence_time))
+              : `${g.home_score ?? "–"} : ${g.away_score ?? "–"}`}
+          </span>
+          <strong className="game-team game-away">{g.away}</strong>
+        </div>
+      ))}
     </div>
   );
 }

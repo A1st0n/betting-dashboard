@@ -2,12 +2,14 @@
 
 Run Here:  pip install -r requirements.txt  &&  python app.py"""
 import os, time, json, mimetypes
+from datetime import datetime, timezone
 import requests
 from flask import Flask, request, session, jsonify, send_from_directory
 from flask_sqlalchemy import SQLAlchemy
 from flask_socketio import SocketIO, emit, join_room
 from sqlalchemy import func
 from werkzeug.security import generate_password_hash, check_password_hash
+from props import build_stats, build_props
 
 DB = os.environ.get("APP_DB", os.path.join(os.path.dirname(__file__), "app.db"))
 DIST = os.path.join(os.path.dirname(__file__), "frontend", "dist")
@@ -131,11 +133,16 @@ def place_bet():
     user = User.query.filter_by(username=session["user"]).first()
     if amount > user.balance:  # mock funds gate: no betting on credit
         return jsonify(error="insufficient funds"), 402
+    try:  # props send their own derived odds; team bets fall back to the odds table
+        odds = float(d["odds"]) if d.get("odds") is not None else ODDS.get(team, 2.0)
+    except (ValueError, TypeError):
+        odds = ODDS.get(team, 2.0)  # ponytail: client odds trusted for mock money only
     user.balance -= amount
     db.session.add(Bet(user_id=user.id, match=match, team=team,
-                       amount=amount, odds=ODDS.get(team, 2.0), ts=time.time()))
+                       amount=amount, odds=odds, ts=time.time()))
     db.session.commit()
     socketio.emit("aggregates", aggregates(user.id), room=session["user"])  # live push to this user only
+    socketio.emit("leaderboard", leaderboard())  # global board updates for everyone
     return jsonify(ok=True, balance=user.balance)
 
 
@@ -187,10 +194,135 @@ def refresh_odds():
     ODDS = load_odds()
 
 
+# --- games (the-odds-api /scores: live + upcoming + completed last 3 days) == pulled from the oddsapi docs
+GAMES_CACHE = os.path.join(os.path.dirname(__file__), "games_cache.json")
+GAMES_TTL = 24 * 3600  # ponytail: 1 fetch/day to stay in free quota; lower it if you need live scores to tick
+GAMES = []      # raw game dicts from the API (status computed at emit time)
+
+
+def _ts(iso):
+    return datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp()
+
+
+def demo_games():
+    """Time-relative demo so the local app shows one of each status without a key."""
+    now = time.time()
+    iso = lambda off: datetime.fromtimestamp(now + off, timezone.utc).isoformat()
+    sc = lambda h, a, hs, as_: [{"name": h, "score": str(hs)}, {"name": a, "score": str(as_)}]
+    return [
+        {"id": "d1", "home_team": "Brazil", "away_team": "Serbia",
+         "commence_time": iso(-3600), "completed": False, "scores": sc("Brazil", "Serbia", 1, 0)},
+        {"id": "d2", "home_team": "France", "away_team": "Australia",
+         "commence_time": iso(3600), "completed": False, "scores": None},
+        {"id": "d3", "home_team": "Argentina", "away_team": "Mexico",
+         "commence_time": iso(-2 * 86400), "completed": True, "scores": sc("Argentina", "Mexico", 2, 0)},
+    ]
+
+
+def list_games(raw):
+    """Shape raw games for the client and tag each live / upcoming / final."""
+    now = time.time()
+    out = []
+    for g in raw:
+        st = "final" if g.get("completed") else ("live" if _ts(g["commence_time"]) <= now else "upcoming")
+        sc = {s["name"]: s["score"] for s in (g.get("scores") or [])}
+        out.append({"id": g["id"], "home": g["home_team"], "away": g["away_team"],
+                    "commence_time": g["commence_time"], "status": st,
+                    "home_score": sc.get(g["home_team"]), "away_score": sc.get(g["away_team"])})
+    rank = {"live": 0, "upcoming": 1, "final": 2}
+    # live first, then soonest upcoming, then most-recently-finished
+    out.sort(key=lambda x: (rank[x["status"]],
+                            _ts(x["commence_time"]) * (-1 if x["status"] == "final" else 1)))
+    return out
+
+
+def load_games():
+    """live + upcoming + games completed in the last 3 days, cached like odds."""
+    cached = json.load(open(GAMES_CACHE)) if os.path.exists(GAMES_CACHE) else []
+    fresh = cached and time.time() - os.path.getmtime(GAMES_CACHE) < GAMES_TTL
+    key = os.environ.get("ODDS_API_KEY")
+    if fresh or not key:
+        return cached or demo_games()
+    try:
+        r = requests.get(
+            "https://api.the-odds-api.com/v4/sports/soccer_fifa_world_cup/scores",
+            params={"apiKey": key, "daysFrom": 3}, timeout=10)
+        r.raise_for_status()
+        games = r.json()
+        if games:
+            json.dump(games, open(GAMES_CACHE, "w"))
+            return games
+    except Exception as e:
+        print("games fetch failed, using cache:", e)
+    return cached or demo_games()
+
+
+def refresh_games():
+    global GAMES
+    GAMES = load_games()
+
+
+# --- player stats + props (theanalyst.com's public Opta feed) -----------
+# ponytail: current WC tournament id; scrape it off the stats page when it rolls over.
+STATS_TMCL = "873cbl9cd9butm4air0mugxzo"
+STATS_URL = f"https://dataviz.theanalyst.com/project-data/soccer/{STATS_TMCL}/player-stats.json"
+STATS_CACHE = os.path.join(os.path.dirname(__file__), "stats_cache.json")
+STATS_TTL = 24 * 3600
+STATS = {}  # label -> top-N player rows
+PROPS = {}  # market -> player prop lines (derived from the same feed)
+
+
+def load_stats():
+    """Leaderboards + props from one cached fetch, refreshed at most once/24h (public, no key)."""
+    global STATS, PROPS
+    if os.path.exists(STATS_CACHE) and time.time() - os.path.getmtime(STATS_CACHE) < STATS_TTL:
+        cached = json.load(open(STATS_CACHE))
+        STATS, PROPS = cached.get("stats", {}), cached.get("props", {})
+        return
+    try:
+        r = requests.get(STATS_URL, timeout=20)
+        r.raise_for_status()
+        data = r.json()
+        STATS, PROPS = build_stats(data), build_props(data)
+        if STATS:
+            json.dump({"stats": STATS, "props": PROPS}, open(STATS_CACHE, "w"))
+    except Exception as e:
+        print("stats fetch failed, keeping current:", e)
+
+
+refresh_stats = load_stats  # alias: fills the STATS/PROPS globals in place
+
+
+@app.get("/api/user/<username>")
+def user_detail(username):
+    user = User.query.filter_by(username=username).first()
+    if not user:
+        return jsonify(error="not found"), 404
+    agg = aggregates(user.id)
+    bets = sum(t["n"] for t in agg["by_team"])
+    return jsonify(user=username, wagered=agg["total"], bets=bets, by_team=agg["by_team"])
+
+
+def leaderboard(n=10):
+    """Global ranking of users by mock money wagered."""
+    rows = (db.session.query(User.username,
+                             func.coalesce(func.sum(Bet.amount), 0).label("wagered"),
+                             func.count(Bet.id).label("bets"))
+            .outerjoin(Bet).group_by(User.id)
+            .order_by(func.coalesce(func.sum(Bet.amount), 0).desc()).limit(n).all())
+    return [{"user": u, "wagered": w, "bets": b} for u, w, b in rows]
+
+
 @socketio.on("connect")
 def on_connect():
     refresh_odds()  # cheap: only hits the API if cache is >24h old
+    refresh_games()
+    refresh_stats()
     emit("odds", ODDS)
+    emit("games", list_games(GAMES))
+    emit("player_stats", STATS)
+    emit("props", PROPS)
+    emit("leaderboard", leaderboard())
     u = session.get("user")  # handshake carries the login cookie
     if u:
         join_room(u)  # bets push back to this room only
@@ -228,5 +360,7 @@ if __name__ == "__main__":
     with app.app_context():
         ensure_schema()
     refresh_odds()  # seed odds at startup (fetches only if cache stale/absent)
+    refresh_games()
+    refresh_stats()
     port = int(os.environ.get("PORT", 5000))
     socketio.run(app, host="0.0.0.0", port=port, debug=True, allow_unsafe_werkzeug=True)
