@@ -359,9 +359,8 @@ def ensure_schema():
 if __name__ == "__main__":
     with app.app_context():
         ensure_schema()
-    refresh_odds()  # seed odds at startup (fetches only if cache stale/absent)
-    refresh_games()
-    refresh_stats()
+    # ponytail: no blocking API fetches here  they'd delay the port bind past
+    # Railway's healthcheck (502). on_connect seeds odds/games/stats lazily instead.
     port = int(os.environ.get("PORT", 5000))
     socketio.run(app, host="0.0.0.0", port=port,
                  debug=bool(os.environ.get("DEBUG")), allow_unsafe_werkzeug=True)
