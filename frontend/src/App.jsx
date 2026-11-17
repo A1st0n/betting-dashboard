@@ -233,9 +233,6 @@ function Dashboard({ agg, balance, board, connected, games, odds, props, stats, 
     <div className="app-shell">
       <header className="topbar">
         <div className="brand">
-          <span className="brand-mark">
-            <Trophy size={24} aria-hidden="true" />
-          </span>
           <div>
             <h1>World Cup Betting Spend</h1>
             <p>Live mock wagers by team</p>
@@ -283,22 +280,18 @@ function Dashboard({ agg, balance, board, connected, games, odds, props, stats, 
 
       <section className="stat-grid" aria-label="Dashboard summary">
         <StatCard
-          icon={<BadgeDollarSign size={20} aria-hidden="true" />}
           label="Total wagered"
           value={money.format(Number(agg.total || 0))}
         />
         <StatCard
-          icon={<BarChart3 size={20} aria-hidden="true" />}
           label="Teams with bets"
           value={spendRows.length.toLocaleString()}
         />
         <StatCard
-          icon={<CircleDollarSign size={20} aria-hidden="true" />}
           label="Total bets"
           value={totalBets.toLocaleString()}
         />
         <StatCard
-          icon={<Trophy size={20} aria-hidden="true" />}
           label="Top team"
           value={topTeam}
         />
@@ -678,10 +671,9 @@ function GamesPanel({ games }) {
   );
 }
 
-function StatCard({ icon, label, value }) {
+function StatCard({ label, value }) {
   return (
     <article className="stat-card" title={`${label}: ${value}`}>
-      <span className="stat-icon">{icon}</span>
       <div>
         <p>{label}</p>
         <strong>{value}</strong>
